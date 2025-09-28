@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Interview Evaluator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { 
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); 
+            color: #e2e8f0; 
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; 
+            min-height: 100vh;
+        }
+        .card { 
+            background: rgba(30, 41, 59, 0.8); 
+            backdrop-filter: blur(10px);
+            border: 1px solid #334155; 
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+        .score-circle {
+            width: 80px; height: 80px;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.875rem; font-weight: bold;
+            transition: all 0.3s ease;
+            background: linear-gradient(135deg, #4f46e5, #7c3aed);
+            color: white;
+            position: relative;
+            overflow: hidden;
+        }
+        .score-circle::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: linear-gradient(45deg, transparent, rgba(255,255,255,0.1), transparent);
+            animation: shimmer 2s linear infinite;
+        }
+        @keyframes shimmer {
+            0% { transform: translateX(-100%) translateY(-100%) rotate(45deg); }
+            100% { transform: translateX(100%) translateY(100%) rotate(45deg); }
+        }
+        .loading-spinner {
+            border: 3px solid #374151;
+            border-top: 3px solid #6366f1;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .glow-button {
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+            transition: all 0.3s ease;
+        }
+        .glow-button:hover {
+            box-shadow: 0 0 30px rgba(99, 102, 241, 0.5);
+            transform: translateY(-2px);
+        }
+        .error-alert {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+        }
+        .success-alert {
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            color: #86efac;
+        }
+
+        /* Custom CSS Icons */
+        .icon {
+            display: inline-block;
+            width: 1.25rem;
+            height: 1.25rem;
+            vertical-align: middle;
+        }
+        .icon-brain::before { content: "🧠"; }
+        .icon-file::before { content: "📄"; }
+        .icon-info::before { content: "ℹ️"; }
+        .icon-play::before { content: "▶️"; }
+        .icon-trash::before { content: "🗑️"; }
+        .icon-check::before { content: "✅"; }
+        .icon-error::before { content: "❌"; }
+        .icon-clipboard::before { content: "📋"; }
+        .icon-message::before { content: "💬"; }
+        .icon-format::before { content: "📐"; }
+    </style>
+</head>
+<body>
+    <div class="min-h-screen p-4 sm:p-8">
+        <div class="max-w-6xl mx-auto">
+            <!-- Header -->
+            <header class="text-center mb-12">
+                <div class="flex justify-center mb-4">
+                    <div class="p-4 rounded-full bg-gradient-to-r from-blue-600 to-purple-600">
+                        <span class="icon icon-brain text-3xl"></span>
+                    </div>
+                </div>
+                <h1 class="text-4xl sm:text-5xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent mb-4">
+                    AI Interview Evaluator
+                </h1>
+                <p class="text-xl text-slate-400 max-w-2xl mx-auto">
+                    Generate comprehensive performance reports from interview transcripts using advanced AI analysis
+                </p>
+            </header>
+
+            <!-- Input Form -->
+            <div class="card p-8 rounded-xl mb-8 fade-in">
+                <div class="flex items-center mb-6">
+                    <span class="icon icon-file text-blue-400 mr-3"></span>
+                    <h2 class="text-2xl font-semibold">Interview Details</h2>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div>
+                        <label for="session_id" class="block text-sm font-medium text-slate-300 mb-2">Session ID</label>
+                        <input type="text" id="session_id" 
+                               class="w-full bg-slate-700/50 border border-slate-600 rounded-lg px-4 py-3 text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                               value="session-xyz-123" placeholder="Enter session ID">
+                    </div>
+                    <div>
+                        <label for="user_id" class="block text-sm font-medium text-slate-300 mb-2">User ID</label>
+                        <input type="text" id="user_id" 
+                               class="w-full bg-slate-700/50 border border-slate-600 rounded-lg px-4 py-3 text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                               value="user-abc-789" placeholder="Enter user ID">
+                    </div>
+                </div>
+
+                <div class="mb-6">
+                    <label for="transcript" class="block text-sm font-medium text-slate-300 mb-2">Interview Transcript</label>
+                    <div class="relative">
+                        <textarea id="transcript" rows="15" 
+                                  class="w-full bg-slate-700/50 border border-slate-600 rounded-lg px-4 py-3 text-white font-mono text-sm placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                                  placeholder="Paste your interview transcript in JSON format...">
+[
+  {
+    "role": "ai", 
+    "content": "Let's start with a coding problem. Please write a function that finds the maximum element in a list."
+  },
+  {
+    "role": "human", 
+    "content": "Okay, I need to find the largest number in a list. I'll iterate through the list and keep track of the maximum value I've seen so far. The time complexity would be O(n) since I need to check each element once."
+  },
+  {
+    "role": "ai", 
+    "content": "That sounds like a good approach. Can you implement this solution?"
+  },
+  {
+    "role": "human", 
+    "content": "def find_max(numbers):\n    if not numbers:\n        return None\n    max_val = numbers[0]\n    for num in numbers[1:]:\n        if num > max_val:\n            max_val = num\n    return max_val"
+  },
+  {
+    "role": "ai", 
+    "content": "Great! I notice you handled the edge case of an empty list. Can you explain your reasoning behind starting with numbers[0]?"
+  },
+  {
+    "role": "human", 
+    "content": "I start with the first element as my initial maximum because it gives me a baseline to compare against. This way I don't need to assume anything about the range of numbers, and it works for both positive and negative numbers."
+  }
+]</textarea>
+                        <button id="formatJson" class="absolute top-2 right-2 px-3 py-1 bg-slate-600 hover:bg-slate-500 text-xs rounded transition-colors">
+                            <span class="icon icon-format mr-1"></span>Format JSON
+                        </button>
+                    </div>
+                    <p class="text-xs text-slate-400 mt-2">
+                        <span class="icon icon-info mr-1"></span>
+                        Enter your interview transcript as a JSON array of message objects with "role" and "content" fields.
+                    </p>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="flex flex-col sm:flex-row gap-4">
+                    <button id="evaluateBtn" class="glow-button text-white px-8 py-3 rounded-lg font-semibold flex items-center justify-center space-x-2 transition-all">
+                        <span class="icon icon-play"></span>
+                        <span>Generate Evaluation</span>
+                    </button>
+                    <button id="clearBtn" class="bg-slate-600 hover:bg-slate-500 text-white px-8 py-3 rounded-lg font-semibold transition-colors">
+                        <span class="icon icon-trash mr-2"></span>
+                        Clear Form
+                    </button>
+                </div>
+            </div>
+
+            <!-- Status Messages -->
+            <div id="statusContainer" class="mb-8"></div>
+
+            <!-- Results Section -->
+            <div id="resultsContainer" style="display: none;" class="fade-in">
+                <!-- Summary Card -->
+                <div class="card p-8 rounded-xl mb-8">
+                    <div class="flex items-center mb-6">
+                        <span class="icon icon-clipboard text-green-400 mr-3"></span>
+                        <h2 class="text-2xl font-semibold">Evaluation Summary</h2>
+                    </div>
+                    <div class="bg-slate-700/30 rounded-lg p-6">
+                        <p id="summaryText" class="text-lg leading-relaxed"></p>
+                    </div>
+                </div>
+
+                <!-- Scores Grid -->
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                    <div class="card p-6 rounded-xl text-center">
+                        <div class="score-circle mx-auto mb-4">
+                            <span id="problemSolvingScore">-</span>
+                        </div>
+                        <h3 class="font-semibold mb-2">Problem Solving</h3>
+                        <p class="text-sm text-slate-400">Correctness & Approach</p>
+                    </div>
+                    
+                    <div class="card p-6 rounded-xl text-center">
+                        <div class="score-circle mx-auto mb-4">
+                            <span id="codeQualityScore">-</span>
+                        </div>
+                        <h3 class="font-semibold mb-2">Code Quality</h3>
+                        <p class="text-sm text-slate-400">Maintainability & Style</p>
+                    </div>
+                    
+                    <div class="card p-6 rounded-xl text-center">
+                        <div class="score-circle mx-auto mb-4">
+                            <span id="technicalKnowledgeScore">-</span>
+                        </div>
+                        <h3 class="font-semibold mb-2">Technical Knowledge</h3>
+                        <p class="text-sm text-slate-400">Depth & Understanding</p>
+                    </div>
+                    
+                    <div class="card p-6 rounded-xl text-center">
+                        <div class="score-circle mx-auto mb-4">
+                            <span id="overallScore">-</span>
+                        </div>
+                        <h3 class="font-semibold mb-2">Overall Score</h3>
+                        <p class="text-sm text-slate-400">Holistic Assessment</p>
+                    </div>
+                </div>
+
+                <!-- Detailed Feedback -->
+                <div class="card p-8 rounded-xl">
+                    <div class="flex items-center mb-6">
+                        <span class="icon icon-message text-purple-400 mr-3"></span>
+                        <h2 class="text-2xl font-semibold">Detailed Feedback</h2>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6" id="detailedFeedback">
+                        <!-- Feedback items will be populated here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:8009';
+
+        // DOM elements
+        const evaluateBtn = document.getElementById('evaluateBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const formatJsonBtn = document.getElementById('formatJson');
+        const statusContainer = document.getElementById('statusContainer');
+        const resultsContainer = document.getElementById('resultsContainer');
+        const transcriptTextarea = document.getElementById('transcript');
+
+        // Utility functions
+        function showStatus(message, type = 'info') {
+            const alertClass = type === 'error' ? 'error-alert' : type === 'success' ? 'success-alert' : 'bg-blue-900/50 border-blue-600 text-blue-200';
+            const icon = type === 'error' ? 'icon-error' : type === 'success' ? 'icon-check' : 'icon-info';
+            
+            statusContainer.innerHTML = `
+                <div class="${alertClass} p-4 rounded-lg border fade-in">
+                    <div class="flex items-center">
+                        <span class="icon ${icon} mr-3"></span>
+                        <span>${message}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function clearStatus() {
+            statusContainer.innerHTML = '';
+        }
+
+        function showLoading() {
+            evaluateBtn.innerHTML = `
+                <div class="loading-spinner mr-2"></div>
+                <span>Analyzing...</span>
+            `;
+            evaluateBtn.disabled = true;
+        }
+
+        function hideLoading() {
+            evaluateBtn.innerHTML = `
+                <span class="icon icon-play"></span>
+                <span>Generate Evaluation</span>
+            `;
+            evaluateBtn.disabled = false;
+        }
+
+        function validateInputs() {
+            const sessionId = document.getElementById('session_id').value.trim();
+            const userId = document.getElementById('user_id').value.trim();
+            const transcript = transcriptTextarea.value.trim();
+
+            if (!sessionId || !userId) {
+                throw new Error('Session ID and User ID are required.');
+            }
+
+            if (!transcript) {
+                throw new Error('Interview transcript is required.');
+            }
+
+            let messages;
+            try {
+                messages = JSON.parse(transcript);
+                if (!Array.isArray(messages)) {
+                    throw new Error('Transcript must be a JSON array.');
+                }
+                if (messages.length === 0) {
+                    throw new Error('Transcript cannot be empty.');
+                }
+                for (const msg of messages) {
+                    if (!msg.role || !msg.content) {
+                        throw new Error('Each message must have "role" and "content" fields.');
+                    }
+                }
+            } catch (e) {
+                if (e.name === 'SyntaxError') {
+                    throw new Error('Invalid JSON format in transcript.');
+                }
+                throw e;
+            }
+
+            return { sessionId, userId, messages };
+        }
+
+        function displayResults(data) {
+            // Update summary
+            document.getElementById('summaryText').textContent = data.summary || 'No summary available';
+
+            // Update scores
+            document.getElementById('problemSolvingScore').textContent = data.problem_solving_correctness_score || '-';
+            document.getElementById('codeQualityScore').textContent = data.code_quality_maintainability_score || '-';
+            document.getElementById('technicalKnowledgeScore').textContent = data.technical_knowledge_depth_score || '-';
+            document.getElementById('overallScore').textContent = data.overall_technical_score || '-';
+
+            // Update detailed feedback
+            const feedbackContainer = document.getElementById('detailedFeedback');
+            const feedbackItems = [
+                { label: 'Problem Solving Correctness', value: data.problem_solving_correctness },
+                { label: 'Code Quality & Maintainability', value: data.code_quality_maintainability },
+                { label: 'Technical Knowledge Depth', value: data.technical_knowledge_depth },
+                { label: 'Language & Tool Proficiency', value: data.language_and_tool_proficiency },
+                { label: 'Problem Comprehension', value: data.problem_comprehension_and_clarification },
+                { label: 'Edge Case Handling', value: data.edge_case_handling_and_testing },
+                { label: 'Debugging Skills', value: data.debugging_and_troubleshooting },
+                { label: 'Independence', value: data.hints_used_independence },
+                { label: 'Communication & Reasoning', value: data.communication_reasoning },
+                { label: 'Receptiveness to Feedback', value: data.receptiveness_to_feedback }
+            ];
+
+            feedbackContainer.innerHTML = feedbackItems
+                .filter(item => item.value && item.value !== 'N/A')
+                .map(item => `
+                    <div class="bg-slate-700/30 rounded-lg p-4">
+                        <h4 class="font-semibold mb-2 text-slate-200">${item.label}</h4>
+                        <p class="text-slate-300 text-sm">${item.value}</p>
+                    </div>
+                `).join('');
+
+            resultsContainer.style.display = 'block';
+            resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        // Event handlers
+        evaluateBtn.addEventListener('click', async () => {
+            clearStatus();
+            
+            try {
+                const { sessionId, userId, messages } = validateInputs();
+                
+                showLoading();
+                showStatus('Sending transcript for AI analysis...', 'info');
+
+                const response = await fetch(`${API_BASE_URL}/evaluate`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        session_id: sessionId,
+                        user_id: userId,
+                        messages: messages
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || `HTTP error! status: ${response.status}`);
+                }
+
+                showStatus('Evaluation completed successfully!', 'success');
+                displayResults(data);
+
+            } catch (error) {
+                console.error('Evaluation error:', error);
+                showStatus(`Error: ${error.message}`, 'error');
+            } finally {
+                hideLoading();
+            }
+        });
+
+        clearBtn.addEventListener('click', () => {
+            document.getElementById('session_id').value = '';
+            document.getElementById('user_id').value = '';
+            transcriptTextarea.value = '';
+            clearStatus();
+            resultsContainer.style.display = 'none';
+        });
+
+        formatJsonBtn.addEventListener('click', () => {
+            try {
+                const transcript = transcriptTextarea.value.trim();
+                if (!transcript) return;
+
+                const parsed = JSON.parse(transcript);
+                transcriptTextarea.value = JSON.stringify(parsed, null, 2);
+                showStatus('JSON formatted successfully!', 'success');
+                setTimeout(clearStatus, 2000);
+            } catch (error) {
+                showStatus('Invalid JSON format', 'error');
+                setTimeout(clearStatus, 3000);
+            }
+        });
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('AI Interview Evaluator loaded successfully');
+        });
+    </script>
+</body>
+</html>
