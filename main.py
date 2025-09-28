@@ -2,25 +2,13 @@ import asyncio
 import json
 import logging
 import base64
-import subprocess
-import sys
-import tempfile
-import os
 import time
 import hashlib
+import httpx
 from typing import Dict, List, Optional, Any
 from fastapi import Response
 import asyncio
-from audio_processor import process_audio_chunk_from_db, process_pending_audio_chunks
-from transcript_service import transcript_service
-from snapshot_service import snapshot_service
-# Try to import docker, but don't fail if it's not available
-try:
-    import docker
-    DOCKER_AVAILABLE = True
-except ImportError:
-    DOCKER_AVAILABLE = False
-    docker = None
+
 from datetime import datetime, timedelta
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -33,8 +21,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, field_validator
 import uvicorn
 import psutil
-
-from database_manager import db_manager
+import os
 
 # Configure logging
 logging.basicConfig(
@@ -43,34 +30,102 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Handle missing modules with stubs
+try:
+    from database_manager import db_manager
+except ImportError:
+    logger.warning("database_manager not found, using stub")
+    class StubDBManager:
+        async def store_session(self, session_id): pass
+        async def update_session_activity(self, session_id, active): pass
+        async def store_code_update(self, session_id, code_entry): pass
+        async def store_execution_result(self, session_id, result_entry): pass
+        async def store_audio_chunk(self, session_id, audio_entry): return "stub_chunk_id"
+        async def get_audio_chunk(self, session_id, chunk_index): return None
+        async def get_audio_chunks_metadata(self, session_id): return []
+        async def get_session_transcripts(self, session_id): return []
+        async def get_full_session_transcript(self, session_id): return ""
+        async def test_connection(self): return "stub connection"
+    db_manager = StubDBManager()
+
+try:
+    from audio_processor import process_audio_chunk_from_db, process_pending_audio_chunks
+except ImportError:
+    logger.warning("audio_processor not found, using stubs")
+    async def process_audio_chunk_from_db(chunk_id): return True
+    async def process_pending_audio_chunks(): pass
+
+try:
+    from transcript_service import transcript_service
+except ImportError:
+    logger.warning("transcript_service not found, using stub")
+    class StubTranscriptService:
+        async def generate_transcript_for_chunk(self, chunk_id, session_id): 
+            return {"success": True, "transcript": "stub transcript"}
+        async def get_transcript_file(self, session_id, chunk_id): return None
+        async def list_session_transcripts(self, session_id): return []
+    transcript_service = StubTranscriptService()
+
+try:
+    from snapshot_service import snapshot_service
+except ImportError:
+    logger.warning("snapshot_service not found, using stub")
+    class StubSnapshotService:
+        async def get_latest_snapshot(self): return None
+        async def get_snapshot_by_id(self, snapshot_id): return None
+        async def list_snapshots(self): return []
+        async def take_snapshot(self): return {"success": True, "snapshot_id": "stub"}
+    snapshot_service = StubSnapshotService()
+
 # Security and validation models
 security = HTTPBearer(auto_error=False)
 
+# Judge0 Configuration
+JUDGE0_URL = "https://ce.judge0.com"
+JUDGE0_HEADERS = {"Content-Type": "application/json"}
+
+# Supported languages with Judge0 IDs
+SUPPORTED_LANGUAGES = {
+    "python": 71,
+    "javascript": 63,
+    "c": 50,
+    "cpp": 54,
+    "java": 62,
+    "go": 60,
+    "rust": 73,
+    "typescript": 74
+}
+
 class CodeExecutionRequest(BaseModel):
     code: str = Field(..., max_length=50000)
-    language: str = Field(default="python", pattern="^(python|javascript|java)$")
+    language: str = Field(default="python", pattern="^(python|javascript|java|go|c|cpp|rust|typescript)$")
     timeout: int = Field(default=5, ge=1, le=30)
+    stdin: str = Field(default="", max_length=10000)
+    test_cases: Optional[List[Dict[str, str]]] = Field(default=None)
+    estimate_big_o: bool = Field(default=False)
     
     @field_validator('code')
     @classmethod
     def validate_code_safety(cls, v):
-        # Basic security checks for dangerous operations
-        dangerous_patterns = [
-            'import os', 'import sys', 'import subprocess', '__import__',
-            'eval(', 'exec(', 'compile(', 'open(', 'file(',
-            'input(', 'raw_input(', 'urllib', 'requests', 'socket'
-        ]
-        
-        code_lower = v.lower()
-        for pattern in dangerous_patterns:
-            if pattern in code_lower:
-                raise ValueError(f'Potentially unsafe operation detected: {pattern}')
+        if len(v.strip()) == 0:
+            raise ValueError('Code cannot be empty')
         return v
 
+class TestCase(BaseModel):
+    stdin: str = Field(..., max_length=10000)
+    expected_output: Optional[str] = Field(default=None, max_length=10000)
+    description: Optional[str] = Field(default="", max_length=200)
+
+class CodeAnalysisRequest(BaseModel):
+    code: str = Field(..., max_length=50000)
+    language: str = Field(default="python")
+    test_cases: List[TestCase] = Field(default=[])
+    estimate_big_o: bool = Field(default=False)
+
 class AudioChunkRequest(BaseModel):
-    audio_data: str = Field(..., max_length=1000000)  # Limit audio size
+    audio_data: str = Field(..., max_length=1000000)
     format: str = Field(default="webm", pattern="^(webm|mp3|wav|ogg)$")
-    duration: float = Field(default=0, ge=0, le=300)  # Max 5 minutes
+    duration: float = Field(default=0, ge=0, le=300)
 
 class CodeUpdateRequest(BaseModel):
     code: str = Field(..., max_length=50000)
@@ -85,13 +140,11 @@ class RateLimiter:
     
     def is_allowed(self, identifier: str) -> bool:
         now = time.time()
-        # Clean old requests
         self.requests[identifier] = [
             req_time for req_time in self.requests[identifier]
             if now - req_time < self.window
         ]
         
-        # Check if under limit
         if len(self.requests[identifier]) < self.max_requests:
             self.requests[identifier].append(now)
             return True
@@ -127,14 +180,12 @@ class ConnectionManager:
             }
         }
         logger.info(f"Client connected: {session_id}")
-        # Store session in database
         await db_manager.store_session(session_id)
         return True
 
     async def disconnect(self, session_id: str):
         if session_id in self.active_connections:
             del self.active_connections[session_id]
-        # Keep session data for a while for analysis
         if session_id in self.session_data:
             self.session_data[session_id]["disconnected_at"] = datetime.now()
         logger.info(f"Client disconnected: {session_id}")
@@ -157,12 +208,10 @@ class ConnectionManager:
                 logger.error(f"Failed to broadcast to {session_id}: {e}")
                 disconnected.append(session_id)
         
-        # Clean up disconnected clients
         for session_id in disconnected:
             await self.disconnect(session_id)
     
     async def cleanup_old_sessions(self):
-        """Remove old inactive sessions"""
         cutoff_time = datetime.now() - self.session_ttl
         to_remove = []
         
@@ -175,170 +224,186 @@ class ConnectionManager:
             del self.session_data[session_id]
             logger.info(f"Cleaned up old session: {session_id}")
 
-# Enhanced Secure Code Sandbox
-class SecureCodeSandbox:
+# Judge0 Code Execution Service
+class Judge0Service:
     def __init__(self):
-        self.docker_client = None
-        self.fallback_mode = True
+        self.base_url = JUDGE0_URL
+        self.headers = JUDGE0_HEADERS
+        self.rate_limiter = RateLimiter(max_requests=20, window=60)
+    
+    async def submit_code(self, source_code: str, language_id: int, stdin: str = "", timeout: int = 5) -> Dict[str, Any]:
+        if not self.rate_limiter.is_allowed("judge0_api"):
+            raise Exception("Rate limit exceeded for code execution")
         
-        if DOCKER_AVAILABLE:
+        submission_data = {
+            "source_code": source_code,
+            "language_id": language_id,
+            "stdin": stdin,
+            "cpu_time_limit": min(timeout, 10),
+            "memory_limit": 256000,
+            "wall_time_limit": min(timeout + 5, 15),
+            "enable_per_process_and_thread_time_limit": True,
+            "enable_per_process_and_thread_memory_limit": True
+        }
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
             try:
-                self.docker_client = docker.from_env()
-                # Test Docker connectivity
-                self.docker_client.ping()
-                self.fallback_mode = False
-                logger.info("Docker sandbox initialized successfully")
+                response = await client.post(
+                    f"{self.base_url}/submissions?base64_encoded=false&wait=true",
+                    headers=self.headers,
+                    json=submission_data
+                )
+                
+                if response.status_code in [200, 201]:
+                    return response.json()
+                else:
+                    raise Exception(f"Judge0 submission failed: {response.status_code} - {response.text}")
+                    
+            except httpx.TimeoutException:
+                raise Exception("Judge0 request timeout")
             except Exception as e:
-                logger.warning(f"Docker not available, using restricted fallback mode: {e}")
-        else:
-            logger.info("Docker module not installed, using restricted fallback mode")
+                raise Exception(f"Judge0 request failed: {str(e)}")
     
-    def execute_python_code(self, code: str, timeout: int = 5) -> dict:
-        """Execute Python code in a secure sandbox"""
-        if not self.fallback_mode and self.docker_client:
-            return self._execute_in_docker(code, timeout)
-        else:
-            return self._execute_restricted_fallback(code, timeout)
-    
-    def _execute_in_docker(self, code: str, timeout: int) -> dict:
-        """Execute code in Docker container"""
-        try:
-            # Create a secure Docker container
-            container = self.docker_client.containers.run(
-                "python:3.9-alpine",
-                f"python -c '{code}'",
-                detach=True,
-                mem_limit="128m",
-                cpu_period=100000,
-                cpu_quota=50000,  # 50% CPU limit
-                network_disabled=True,
-                remove=True,
-                stdout=True,
-                stderr=True
-            )
-            
-            # Wait for completion with timeout
-            result = container.wait(timeout=timeout)
-            logs = container.logs().decode('utf-8')
-            
-            return {
-                "success": result['StatusCode'] == 0,
-                "output": logs if result['StatusCode'] == 0 else "",
-                "error": logs if result['StatusCode'] != 0 else "",
-                "execution_time": f"< {timeout}s",
-                "memory_usage": "< 128MB",
-                "security_level": "Docker Sandboxed"
-            }
-            
-        except docker.errors.ContainerError as e:
+    async def execute_code(self, code: str, language: str, stdin: str = "", timeout: int = 5) -> Dict[str, Any]:
+        if language not in SUPPORTED_LANGUAGES:
             return {
                 "success": False,
                 "output": "",
-                "error": f"Container error: {str(e)}",
-                "execution_time": f"< {timeout}s",
-                "memory_usage": "N/A",
-                "security_level": "Docker Sandboxed"
+                "error": f"Unsupported language: {language}",
+                "execution_time": "0ms",
+                "memory_usage": "0KB",
+                "security_level": "Judge0 Sandboxed",
+                "status": "Language Error"
             }
+        
+        language_id = SUPPORTED_LANGUAGES[language]
+        
+        try:
+            result = await self.submit_code(code, language_id, stdin, timeout)
+            
+            status_desc = result.get("status", {}).get("description", "Unknown")
+            stdout = result.get("stdout", "") or ""
+            stderr = result.get("stderr", "") or ""
+            compile_output = result.get("compile_output", "") or ""
+            time_taken = result.get("time", "0")
+            memory_used = result.get("memory", "0")
+            
+            success = status_desc == "Accepted"
+            output = stdout.strip() if success else ""
+            error_parts = []
+            
+            if compile_output:
+                error_parts.append(f"Compile Error: {compile_output}")
+            if stderr:
+                error_parts.append(f"Runtime Error: {stderr}")
+            if not success and status_desc != "Accepted":
+                error_parts.append(f"Status: {status_desc}")
+            
+            error = "\n".join(error_parts) if error_parts else ""
+            
+            return {
+                "success": success,
+                "output": output,
+                "error": error,
+                "execution_time": f"{float(time_taken or 0) * 1000:.0f}ms" if time_taken else "0ms",
+                "memory_usage": f"{int(memory_used or 0)}KB" if memory_used else "0KB",
+                "security_level": "Judge0 Sandboxed",
+                "status": status_desc,
+                "raw_result": result
+            }
+            
         except Exception as e:
             return {
                 "success": False,
                 "output": "",
-                "error": f"Docker execution failed: {str(e)}",
+                "error": str(e),
                 "execution_time": "N/A",
                 "memory_usage": "N/A",
-                "security_level": "Docker Sandboxed"
+                "security_level": "Judge0 Sandboxed",
+                "status": "Execution Failed"
             }
     
-    def _execute_restricted_fallback(self, code: str, timeout: int) -> dict:
-        """Fallback execution with heavy restrictions"""
-        try:
-            # Additional safety checks
-            if any(keyword in code.lower() for keyword in 
-                   ['import', 'exec', 'eval', 'open', 'file', '__']):
-                return {
-                    "success": False,
-                    "output": "",
-                    "error": "Restricted operations not allowed in fallback mode",
-                    "execution_time": "0s",
-                    "memory_usage": "0MB",
-                    "security_level": "Restricted Fallback"
-                }
+    async def run_test_cases(self, code: str, language: str, test_cases: List[Dict], timeout: int = 5) -> Dict[str, Any]:
+        results = []
+        passed_count = 0
+        total_time = 0
+        max_memory = 0
+        
+        for i, test_case in enumerate(test_cases):
+            stdin = test_case.get("stdin", "")
+            expected = test_case.get("expected_output")
+            description = test_case.get("description", f"Test case {i+1}")
             
-            # Create temporary file in secure location
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-                # Wrap code in restricted environment
-                restricted_code = f"""
-import sys
-import signal
-
-def timeout_handler(signum, frame):
-    raise TimeoutError("Execution timeout")
-
-signal.signal(signal.SIGALRM, timeout_handler)
-signal.alarm({timeout})
-
-try:
-    # User code here
-{chr(10).join('    ' + line for line in code.split(chr(10)))}
-except Exception as e:
-    print(f"Error: {{e}}")
-finally:
-    signal.alarm(0)
-"""
-                f.write(restricted_code)
-                temp_file = f.name
-            
-            # Execute with strict limitations
-            result = subprocess.run(
-                [sys.executable, temp_file],
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                cwd=tempfile.gettempdir(),
-                env={"PYTHONDONTWRITEBYTECODE": "1"}  # Prevent .pyc files
-            )
-            
-            # Clean up
-            os.unlink(temp_file)
-            
-            return {
-                "success": result.returncode == 0,
-                "output": result.stdout[:1000],  # Limit output
-                "error": result.stderr[:1000] if result.stderr else "",
-                "execution_time": f"< {timeout}s",
-                "memory_usage": "Limited",
-                "security_level": "Restricted Fallback"
-            }
-            
-        except subprocess.TimeoutExpired:
-            if 'temp_file' in locals():
+            try:
+                result = await self.execute_code(code, language, stdin, timeout)
+                
+                is_correct = True
+                if expected is not None:
+                    actual_output = result.get("output", "").strip()
+                    expected_output = expected.strip()
+                    is_correct = actual_output == expected_output
+                    
+                    if not is_correct:
+                        result["error"] = result.get("error", "") + f"\nExpected: '{expected_output}'\nActual: '{actual_output}'"
+                
+                if result["success"] and is_correct:
+                    passed_count += 1
+                
+                time_str = result.get("execution_time", "0ms").replace("ms", "")
                 try:
-                    os.unlink(temp_file)
+                    total_time += float(time_str)
                 except:
                     pass
-            return {
-                "success": False,
-                "output": "",
-                "error": "Code execution timed out",
-                "execution_time": f"> {timeout}s",
-                "memory_usage": "N/A",
-                "security_level": "Restricted Fallback"
+                
+                memory_str = result.get("memory_usage", "0KB").replace("KB", "")
+                try:
+                    max_memory = max(max_memory, int(memory_str))
+                except:
+                    pass
+                
+                results.append({
+                    "test_case": i + 1,
+                    "description": description,
+                    "stdin": stdin,
+                    "expected_output": expected,
+                    "actual_output": result.get("output", ""),
+                    "success": result["success"] and is_correct,
+                    "error": result.get("error", ""),
+                    "execution_time": result.get("execution_time", "N/A"),
+                    "memory_usage": result.get("memory_usage", "N/A"),
+                    "status": result.get("status", "Unknown")
+                })
+                
+            except Exception as e:
+                results.append({
+                    "test_case": i + 1,
+                    "description": description,
+                    "stdin": stdin,
+                    "expected_output": expected,
+                    "actual_output": "",
+                    "success": False,
+                    "error": str(e),
+                    "execution_time": "N/A",
+                    "memory_usage": "N/A",
+                    "status": "Test Failed"
+                })
+        
+        return {
+            "results": results,
+            "summary": {
+                "total_tests": len(test_cases),
+                "passed": passed_count,
+                "failed": len(test_cases) - passed_count,
+                "success_rate": f"{(passed_count / len(test_cases) * 100):.1f}%" if test_cases else "0%",
+                "total_execution_time": f"{total_time:.0f}ms",
+                "max_memory_usage": f"{max_memory}KB"
             }
-        except Exception as e:
-            return {
-                "success": False,
-                "output": "",
-                "error": f"Execution error: {str(e)}",
-                "execution_time": "N/A",
-                "memory_usage": "N/A",
-                "security_level": "Restricted Fallback"
-            }
+        }
 
 # Enhanced Code Analysis
-class CodeAnalyzer:
+class EnhancedCodeAnalyzer:
     @staticmethod
-    def analyze_code(code: str) -> dict:
-        """Comprehensive code analysis"""
+    def analyze_code(code: str, language: str = "python") -> dict:
         analysis = {
             "syntax_valid": True,
             "complexity": "Low",
@@ -346,11 +411,29 @@ class CodeAnalyzer:
             "potential_errors": [],
             "security_issues": [],
             "performance_hints": [],
-            "code_quality_score": 100
+            "code_quality_score": 100,
+            "language": language,
+            "line_count": len(code.split('\n')),
+            "char_count": len(code),
+            "estimated_time_complexity": "O(1)"
         }
         
+        if language == "python":
+            return EnhancedCodeAnalyzer._analyze_python(code, analysis)
+        elif language in ["javascript", "typescript"]:
+            return EnhancedCodeAnalyzer._analyze_javascript(code, analysis)
+        elif language in ["java"]:
+            return EnhancedCodeAnalyzer._analyze_java(code, analysis)
+        elif language in ["c", "cpp"]:
+            return EnhancedCodeAnalyzer._analyze_c_cpp(code, analysis)
+        elif language == "go":
+            return EnhancedCodeAnalyzer._analyze_go(code, analysis)
+        else:
+            return EnhancedCodeAnalyzer._analyze_generic(code, analysis)
+    
+    @staticmethod
+    def _analyze_python(code: str, analysis: dict) -> dict:
         try:
-            # Syntax validation
             compile(code, '<string>', 'exec')
             analysis["syntax_valid"] = True
         except SyntaxError as e:
@@ -358,173 +441,454 @@ class CodeAnalyzer:
             analysis["potential_errors"].append(f"Syntax Error: {str(e)}")
             analysis["code_quality_score"] -= 30
         
-        # Complexity analysis
-        nested_loops = 0
-        lines = code.split('\n')
-        indent_level = 0
-        max_indent = 0
-        
-        for line in lines:
-            stripped = line.strip()
-            if not stripped or stripped.startswith('#'):
-                continue
-                
-            # Count indentation
-            current_indent = len(line) - len(line.lstrip())
-            max_indent = max(max_indent, current_indent)
-            
-            # Count nested structures
-            if any(keyword in stripped for keyword in ['for ', 'while ']):
-                nested_loops += 1
-        
+        nested_loops = code.count('for ') + code.count('while ')
         if nested_loops >= 3:
             analysis["complexity"] = "High"
-            analysis["performance_hints"].append("Consider reducing nested loops")
-            analysis["code_quality_score"] -= 20
-        elif nested_loops >= 2:
-            analysis["complexity"] = "Medium"
-            analysis["performance_hints"].append("Watch out for O(n²) complexity")
-            analysis["code_quality_score"] -= 10
+            analysis["estimated_time_complexity"] = "O(n³) or higher"
+        elif nested_loops == 2:
+            analysis["complexity"] = "Medium" 
+            analysis["estimated_time_complexity"] = "O(n²)"
+        elif nested_loops == 1:
+            analysis["estimated_time_complexity"] = "O(n)"
         
-        # Style analysis
-        for i, line in enumerate(lines, 1):
-            if len(line) > 120:
-                analysis["style_issues"].append(f"Line {i}: Line too long (>120 chars)")
-                analysis["code_quality_score"] -= 2
-            
-            if line.strip() and not line.startswith(' ') and not line.startswith('\t'):
-                continue  # Top level is fine
-            elif line.strip() and '    ' not in line and '\t' not in line and i > 1:
-                analysis["style_issues"].append(f"Line {i}: Inconsistent indentation")
-                analysis["code_quality_score"] -= 5
-        
-        # Security analysis
-        security_patterns = {
-            'eval(': 'Dangerous eval() usage',
-            'exec(': 'Dangerous exec() usage', 
-            '__import__': 'Dynamic imports detected',
-            'input(': 'User input without validation'
-        }
-        
-        code_lower = code.lower()
-        for pattern, message in security_patterns.items():
-            if pattern in code_lower:
-                analysis["security_issues"].append(message)
+        dangerous_patterns = ['eval(', 'exec(', 'import os', 'import subprocess']
+        for pattern in dangerous_patterns:
+            if pattern in code:
+                analysis["security_issues"].append(f"Potentially dangerous: {pattern}")
                 analysis["code_quality_score"] -= 15
-        
-        # Ensure score doesn't go below 0
-        analysis["code_quality_score"] = max(0, analysis["code_quality_score"])
         
         return analysis
     
     @staticmethod
-    def generate_suggestions(code: str, analysis: dict) -> List[str]:
-        """Generate intelligent suggestions based on analysis"""
-        suggestions = []
+    def _analyze_javascript(code: str, analysis: dict) -> dict:
+        if 'eval(' in code:
+            analysis["security_issues"].append("Dangerous eval() usage")
+            analysis["code_quality_score"] -= 20
         
-        if not analysis["syntax_valid"]:
-            suggestions.append("🔧 Fix syntax errors before proceeding")
+        loop_count = code.count('for(') + code.count('for (') + code.count('while(') + code.count('while (')
+        if loop_count >= 2:
+            analysis["complexity"] = "Medium"
+            analysis["estimated_time_complexity"] = "O(n²)"
+        elif loop_count == 1:
+            analysis["estimated_time_complexity"] = "O(n)"
         
-        if analysis["complexity"] == "High":
-            suggestions.append("⚡ Consider optimizing algorithm complexity - maybe use hash maps or sort first?")
-        elif analysis["complexity"] == "Medium":
-            suggestions.append("💡 Good structure! Consider if you can optimize any nested loops")
+        return analysis
+    
+    @staticmethod 
+    def _analyze_java(code: str, analysis: dict) -> dict:
+        if 'System.exit(' in code:
+            analysis["security_issues"].append("System.exit() usage")
         
-        if analysis["security_issues"]:
-            suggestions.append("🛡️ Security concerns detected - avoid eval/exec and validate inputs")
+        loop_patterns = ['for(', 'for (', 'while(', 'while (', 'do {']
+        loop_count = sum(code.count(pattern) for pattern in loop_patterns)
         
-        if not code.strip():
-            suggestions.append("🚀 Start by defining your function signature and thinking about the approach")
-        elif len(code.strip().split('\n')) < 3:
-            suggestions.append("📝 Consider adding comments to explain your approach")
+        if loop_count >= 2:
+            analysis["complexity"] = "Medium"
+            analysis["estimated_time_complexity"] = "O(n²)"
+        elif loop_count == 1:
+            analysis["estimated_time_complexity"] = "O(n)"
+            
+        return analysis
+    
+    @staticmethod
+    def _analyze_c_cpp(code: str, analysis: dict) -> dict:
+        dangerous_functions = ['system(', 'exec(', 'scanf(', 'gets(']
+        for func in dangerous_functions:
+            if func in code:
+                analysis["security_issues"].append(f"Potentially unsafe function: {func}")
+                analysis["code_quality_score"] -= 10
         
-        if analysis["code_quality_score"] > 80:
-            suggestions.append("✨ Great code quality! Keep it up!")
-        elif analysis["code_quality_score"] > 60:
-            suggestions.append("👍 Good progress! Address the style issues for cleaner code")
-        else:
-            suggestions.append("🔨 Focus on fixing the issues highlighted above")
+        if 'malloc(' in code and 'free(' not in code:
+            analysis["potential_errors"].append("Possible memory leak - malloc without free")
+            
+        return analysis
+    
+    @staticmethod
+    def _analyze_go(code: str, analysis: dict) -> dict:
+        if 'os/exec' in code:
+            analysis["security_issues"].append("Command execution detected")
+            
+        if 'go func(' in code or 'go ' in code:
+            analysis["complexity"] = "Medium"
+            analysis["performance_hints"].append("Concurrent code - ensure proper synchronization")
+            
+        return analysis
+    
+    @staticmethod
+    def _analyze_generic(code: str, analysis: dict) -> dict:
+        lines = code.split('\n')
+        non_empty_lines = [line for line in lines if line.strip()]
         
-        return suggestions
+        if len(non_empty_lines) > 50:
+            analysis["complexity"] = "High"
+        elif len(non_empty_lines) > 20:
+            analysis["complexity"] = "Medium"
+            
+        return analysis
 
-# Initialize components
+def detect_language_from_code(code: str) -> str:
+    code_lower = code.lower().strip()
+    
+    if any(keyword in code_lower for keyword in ['def ', 'import ', 'print(', 'len(', 'range(']):
+        return "python"
+    elif any(keyword in code_lower for keyword in ['function ', 'const ', 'let ', 'var ', 'console.log']):
+        return "javascript"
+    elif any(keyword in code_lower for keyword in ['public class', 'system.out.print', 'string[]']):
+        return "java"
+    elif any(keyword in code_lower for keyword in ['#include', 'int main(', 'printf(', 'cout <<']):
+        return "cpp" if 'cout' in code_lower or 'cin' in code_lower else "c"
+    elif any(keyword in code_lower for keyword in ['func main(', 'package main', 'fmt.print']):
+        return "go"
+    elif any(keyword in code_lower for keyword in ['fn main(', 'println!', 'let mut']):
+        return "rust"
+    else:
+        return "python"
+
+def generate_enhanced_suggestions(code: str, analysis: dict, language: str) -> List[str]:
+    suggestions = []
+    
+    if not analysis["syntax_valid"]:
+        suggestions.append(f"Fix syntax errors in your {language} code")
+    
+    if analysis["complexity"] == "High":
+        suggestions.append("Consider optimizing your algorithm - current complexity seems high")
+    elif analysis["complexity"] == "Medium":
+        suggestions.append("Good structure! Consider if nested loops can be optimized")
+    
+    if analysis["security_issues"]:
+        suggestions.append("Address security concerns - avoid dangerous functions")
+    
+    if analysis["code_quality_score"] > 80:
+        suggestions.append("Excellent code quality!")
+    elif analysis["code_quality_score"] > 60:
+        suggestions.append("Good progress! Address style issues for cleaner code")
+    else:
+        suggestions.append("Focus on fixing the highlighted issues")
+    
+    if language == "python" and "import" not in code and len(code) > 100:
+        suggestions.append("Consider using appropriate Python libraries for your solution")
+    elif language == "java" and "public class" not in code:
+        suggestions.append("Remember to wrap your code in a proper Java class structure")
+    elif language in ["c", "cpp"] and "#include" not in code:
+        suggestions.append("Don't forget to include necessary header files")
+    
+    return suggestions
+
+# Initialize services
 manager = ConnectionManager()
-sandbox = SecureCodeSandbox()
-analyzer = CodeAnalyzer()
+judge0_service = Judge0Service()
+code_analyzer = EnhancedCodeAnalyzer()
 
+# Lifecycle management
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    async def cleanup_task():
-        while True:
-            await asyncio.sleep(300)  # Every 5 minutes
-            await manager.cleanup_old_sessions()
-    
-    async def audio_processing_task():
-        while True:
-            await asyncio.sleep(60)  # Every minute
-            await process_pending_audio_chunks()
-    
-    async def snapshot_task():
-        """Background task for periodic sandbox snapshots"""
-        await snapshot_service.start_background_snapshot_task()
-    
-    cleanup_task_handle = asyncio.create_task(cleanup_task())
-    audio_task_handle = asyncio.create_task(audio_processing_task())
-    snapshot_task_handle = asyncio.create_task(snapshot_task())
+    logger.info("Starting background tasks...")
+    cleanup_task = asyncio.create_task(cleanup_sessions_periodically())
+    audio_processing_task = asyncio.create_task(background_audio_processing())
     
     yield
     
     # Shutdown
-    cleanup_task_handle.cancel()
-    audio_task_handle.cancel()
-    snapshot_task_handle.cancel()
-    snapshot_service.stop_background_snapshot_task()
+    logger.info("Shutting down background tasks...")
+    cleanup_task.cancel()
+    audio_processing_task.cancel()
+    try:
+        await cleanup_task
+        await audio_processing_task
+    except asyncio.CancelledError:
+        pass
+
+async def cleanup_sessions_periodically():
+    """Background task to clean up old sessions"""
+    while True:
+        try:
+            await manager.cleanup_old_sessions()
+            await asyncio.sleep(300)  # Clean up every 5 minutes
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Session cleanup error: {e}")
+            await asyncio.sleep(60)
+
+async def background_audio_processing():
+    """Background task to process pending audio chunks"""
+    while True:
+        try:
+            await process_pending_audio_chunks()
+            await asyncio.sleep(30)  # Check every 30 seconds
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Background audio processing error: {e}")
+            await asyncio.sleep(60)
+
 # Initialize FastAPI app
 app = FastAPI(
-    title="CodeSage AI Interviewer - Enhanced", 
+    title="CodeSage AI Interviewer",
+    description="Enhanced AI-powered coding interview platform with Judge0 integration",
     version="2.0.0",
-    description="Secure AI-powered coding interview platform with real-time monitoring",
     lifespan=lifespan
 )
 
-# FIXED: Enhanced CORS configuration with localhost:8000
+# CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000", 
-        "http://localhost:8000",  # Added this - same port as server
-        "http://localhost:8080", 
-        "http://localhost:8081",  
-        "http://127.0.0.1:8000",  # Added this - IP version
-        "http://127.0.0.1:8081",
-        "file://"  # For direct file access
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
-# Authentication dependency (basic implementation)
-async def get_current_session(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    if not credentials:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required"
+# Static files - only mount if directory exists
+import os
+if os.path.exists("static"):
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+else:
+    logger.warning("Static directory not found - creating it")
+    os.makedirs("static", exist_ok=True)
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Enhanced WebSocket message handlers
+async def handle_code_execution(session_id: str, message: dict):
+    try:
+        session_data = manager.session_data[session_id]
+        if session_data["execution_count"] >= 20:
+            await manager.send_personal_message({
+                "type": "error", 
+                "message": "Execution limit reached for this session (20 executions max)"
+            }, session_id)
+            return
+        
+        try:
+            exec_data = CodeExecutionRequest(**message)
+        except Exception as e:
+            await manager.send_personal_message({
+                "type": "error", 
+                "message": f"Invalid execution request: {str(e)}"
+            }, session_id)
+            return
+        
+        code = exec_data.code
+        language = exec_data.language
+        timeout = exec_data.timeout
+        stdin = exec_data.stdin
+        test_cases = exec_data.test_cases
+        
+        if test_cases:
+            execution_result = await judge0_service.run_test_cases(
+                code, language, test_cases, timeout
+            )
+            result_type = "test_results"
+        else:
+            execution_result = await judge0_service.execute_code(
+                code, language, stdin, timeout
+            )
+            result_type = "execution_result"
+        
+        result_entry = {
+            "code": code[:500],
+            "code_hash": hashlib.md5(code.encode()).hexdigest(),
+            "result": execution_result,
+            "timestamp": datetime.now().isoformat(),
+            "language": language,
+            "result_type": result_type
+        }
+        
+        session_data["execution_results"].append(result_entry)
+        await db_manager.store_execution_result(session_id, result_entry)
+        session_data["execution_count"] += 1
+        
+        response = {
+            "type": result_type,
+            "timestamp": result_entry["timestamp"],
+            "result": execution_result,
+            "session_stats": {
+                "total_executions": session_data["execution_count"],
+                "executions_remaining": 20 - session_data["execution_count"]
+            }
+        }
+        
+        await manager.send_personal_message(response, session_id)
+        
+    except Exception as e:
+        logger.error(f"Code execution error for session {session_id}: {e}")
+        await manager.send_personal_message({
+            "type": "error", 
+            "message": f"Execution failed: {str(e)}"
+        }, session_id)
+
+async def handle_code_update(session_id: str, message: dict):
+    try:
+        update_data = CodeUpdateRequest(**message)
+        
+        code = update_data.code
+        cursor_position = update_data.cursor_position
+        timestamp = datetime.now()
+        
+        language = detect_language_from_code(code)
+        
+        code_entry = {
+            "code": code,
+            "cursor_position": cursor_position,
+            "timestamp": timestamp.isoformat(),
+            "line_count": len(code.split('\n')),
+            "char_count": len(code),
+            "language": language,
+            "hash": hashlib.md5(code.encode()).hexdigest()
+        }
+        
+        session_data = manager.session_data[session_id]
+        session_data["code_history"].append(code_entry)
+        await db_manager.store_code_update(session_id, code_entry)
+        
+        if len(session_data["code_history"]) > 50:
+            session_data["code_history"] = session_data["code_history"][-50:]
+        
+        analysis = code_analyzer.analyze_code(code, language)
+        suggestions = generate_enhanced_suggestions(code, analysis, language)
+        
+        response = {
+            "type": "code_analysis",
+            "timestamp": timestamp.isoformat(),
+            "analysis": analysis,
+            "suggestions": suggestions,
+            "session_stats": {
+                "total_updates": len(session_data["code_history"]),
+                "current_quality_score": analysis["code_quality_score"],
+                "detected_language": language
+            }
+        }
+        
+        await manager.send_personal_message(response, session_id)
+        
+    except Exception as e:
+        logger.error(f"Code update error for session {session_id}: {e}")
+        await manager.send_personal_message(
+            {"type": "error", "message": "Failed to process code update"}, 
+            session_id
         )
-    # In production, validate JWT token here
-    return credentials.credentials
 
+async def handle_audio_chunk(session_id: str, message: dict):
+    try:
+        logger.info(f"Processing audio chunk for session {session_id}")
+        
+        if 'audio_data' not in message:
+            logger.error("No 'audio_data' key in message!")
+            await manager.send_personal_message({
+                "type": "error",
+                "message": "No audio_data field in message"
+            }, session_id)
+            return
+        
+        audio_data_raw = message.get('audio_data')
+        audio_format = message.get("format", "webm")
+        duration = float(message.get("duration", 0))
+        
+        if isinstance(audio_data_raw, str) and audio_data_raw.startswith('data:'):
+            try:
+                _, audio_data_b64 = audio_data_raw.split(',', 1)
+            except ValueError:
+                logger.error("Invalid data URL format")
+                await manager.send_personal_message({
+                    "type": "error",
+                    "message": "Invalid data URL format"
+                }, session_id)
+                return
+        else:
+            audio_data_b64 = str(audio_data_raw)
+        
+        if not audio_data_b64 or len(audio_data_b64) < 100:
+            await manager.send_personal_message({
+                "type": "error",
+                "message": f"Audio data too short: {len(audio_data_b64)} characters"
+            }, session_id)
+            return
+        
+        try:
+            decoded = base64.b64decode(audio_data_b64)
+        except Exception as e:
+            await manager.send_personal_message({
+                "type": "error",
+                "message": f"Invalid base64 audio data: {str(e)}"
+            }, session_id)
+            return
+        
+        session_data = manager.session_data.get(session_id)
+        if not session_data:
+            await manager.send_personal_message({
+                "type": "error",
+                "message": "Session not found"
+            }, session_id)
+            return
+        
+        total_duration = session_data.get("total_audio_duration", 0)
+        if total_duration + duration > 1800:
+            await manager.send_personal_message({
+                "type": "error",
+                "message": f"Audio duration limit exceeded (current: {total_duration}s)"
+            }, session_id)
+            return
+        
+        timestamp = datetime.now()
+        audio_entry = {
+            "format": audio_format,
+            "timestamp": timestamp.isoformat(),
+            "duration": duration,
+            "size_bytes": len(audio_data_b64),
+            "audio_hash": hashlib.md5(audio_data_b64.encode()).hexdigest(),
+            "audio_data": audio_data_b64,
+            "chunk_index": len(session_data.get("audio_chunks", []))
+        }
+        
+        try:
+            chunk_id = await db_manager.store_audio_chunk(session_id, audio_entry)
+            if chunk_id is None:
+                raise Exception("Database returned None for chunk_id")
+        except Exception as db_error:
+            await manager.send_personal_message({
+                "type": "error",
+                "message": f"Database storage failed: {str(db_error)}"
+            }, session_id)
+            return
+        
+        session_data["audio_chunks"].append({
+            "chunk_id": chunk_id,
+            "timestamp": timestamp.isoformat(),
+            "duration": duration,
+            "format": audio_format
+        })
+        session_data["total_audio_duration"] = total_duration + duration
+        
+        asyncio.create_task(process_audio_chunk_from_db(str(chunk_id)))
+        
+        await manager.send_personal_message({
+            "type": "audio_received",
+            "timestamp": timestamp.isoformat(),
+            "chunk_id": chunk_id,
+            "message": "Audio chunk stored and processing started",
+            "session_stats": {
+                "total_audio_chunks": len(session_data["audio_chunks"]),
+                "total_duration": session_data["total_audio_duration"],
+                "remaining_duration": 1800 - session_data["total_audio_duration"]
+            }
+        }, session_id)
+        
+    except Exception as e:
+        logger.error(f"Critical error in handle_audio_chunk: {e}", exc_info=True)
+        await manager.send_personal_message({
+            "type": "error",
+            "message": f"Failed to process audio: {str(e)}",
+            "error_type": type(e).__name__
+        }, session_id)
 
-# WebSocket endpoint with enhanced security
+# WebSocket endpoint
 @app.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
-    # Validate session ID format
     if not session_id or len(session_id) > 64:
         await websocket.close(code=1008, reason="Invalid session ID")
         return
     
-    # Rate limiting check
     if not manager.rate_limiter.is_allowed(session_id):
         await websocket.close(code=1008, reason="Rate limit exceeded")
         return
@@ -534,7 +898,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     
     try:
         while True:
-            # Receive message with timeout
             try:
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
             except asyncio.TimeoutError:
@@ -553,13 +916,10 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 )
                 continue
             
-            # Update activity timestamp
             manager.session_data[session_id]["last_activity"] = datetime.now()
-            # Update database activity
             await db_manager.update_session_activity(session_id, True)
             message_type = message.get("type")
             
-            # Route messages to handlers
             if message_type == "code_update":
                 await handle_code_update(session_id, message)
             elif message_type == "code_execute":
@@ -584,289 +944,97 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         logger.error(f"WebSocket error for session {session_id}: {e}")
         await manager.disconnect(session_id)
 
-# Enhanced message handlers
-async def handle_code_update(session_id: str, message: dict):
-    """Handle real-time code updates with validation"""
+# API Endpoints
+@app.post("/api/code/execute")
+async def execute_code_endpoint(request: CodeExecutionRequest):
+    """Execute code using Judge0 API"""
     try:
-        # Validate using Pydantic model
-        update_data = CodeUpdateRequest(**message)
+        if request.test_cases:
+            result = await judge0_service.run_test_cases(
+                request.code, 
+                request.language, 
+                [tc.dict() for tc in request.test_cases], 
+                request.timeout
+            )
+        else:
+            result = await judge0_service.execute_code(
+                request.code, 
+                request.language, 
+                request.stdin, 
+                request.timeout
+            )
         
-        code = update_data.code
-        cursor_position = update_data.cursor_position
-        timestamp = datetime.now()
-        
-        # Store code history with size limits
-        code_entry = {
-            "code": code,
-            "cursor_position": cursor_position,
-            "timestamp": timestamp.isoformat(),
-            "line_count": len(code.split('\n')),
-            "char_count": len(code),
-            "hash": hashlib.md5(code.encode()).hexdigest()
+        return {
+            "success": True,
+            "data": result,
+            "timestamp": datetime.now().isoformat()
         }
         
-        session_data = manager.session_data[session_id]
-        session_data["code_history"].append(code_entry)
-        await db_manager.store_code_update(session_id, code_entry)
+    except Exception as e:
+        logger.error(f"Code execution API error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-        # Keep only last 50 code updates to prevent memory bloat
-        if len(session_data["code_history"]) > 50:
-            session_data["code_history"] = session_data["code_history"][-50:]
+@app.post("/api/code/analyze")
+async def analyze_code_endpoint(request: CodeAnalysisRequest):
+    """Analyze code quality and run test cases"""
+    try:
+        analysis = code_analyzer.analyze_code(request.code, request.language)
+        suggestions = generate_enhanced_suggestions(request.code, analysis, request.language)
         
-        # Analyze code
-        analysis = analyzer.analyze_code(code)
-        suggestions = analyzer.generate_suggestions(code, analysis)
+        test_results = None
+        if request.test_cases:
+            test_results = await judge0_service.run_test_cases(
+                request.code,
+                request.language,
+                [tc.dict() for tc in request.test_cases],
+                5
+            )
         
-        # Send analysis back to client
-        response = {
-            "type": "code_analysis",
-            "timestamp": timestamp.isoformat(),
+        return {
+            "success": True,
             "analysis": analysis,
             "suggestions": suggestions,
-            "session_stats": {
-                "total_updates": len(session_data["code_history"]),
-                "current_quality_score": analysis["code_quality_score"]
-            }
+            "test_results": test_results,
+            "timestamp": datetime.now().isoformat()
         }
         
-        await manager.send_personal_message(response, session_id)
-        
     except Exception as e:
-        logger.error(f"Code update error for session {session_id}: {e}")
-        await manager.send_personal_message(
-            {"type": "error", "message": "Failed to process code update"}, 
-            session_id
-        )
+        logger.error(f"Code analysis API error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-async def handle_code_execution(session_id: str, message: dict):
-    """Handle code execution with enhanced security"""
+@app.get("/api/languages")
+async def get_supported_languages():
+    """Get list of supported programming languages"""
+    return {
+        "languages": list(SUPPORTED_LANGUAGES.keys()),
+        "details": SUPPORTED_LANGUAGES,
+        "default": "python"
+    }
+
+@app.get("/api/judge0/status")
+async def judge0_status():
+    """Check Judge0 API status"""
     try:
-        # Rate limiting for executions
-        session_data = manager.session_data[session_id]
-        if session_data["execution_count"] >= 10:  # Max 10 executions per session
-            await manager.send_personal_message({
-                "type": "error", 
-                "message": "Execution limit reached for this session"
-            }, session_id)
-            return
-        
-        # Validate using Pydantic model
-        exec_data = CodeExecutionRequest(**message)
-        
-        code = exec_data.code
-        language = exec_data.language
-        timeout = exec_data.timeout
-        
-        # Execute code
-        if language == "python":
-            execution_result = sandbox.execute_python_code(code, timeout)
-        else:
-            execution_result = {
-                "success": False,
-                "output": "",
-                "error": f"Language '{language}' not supported yet",
-                "execution_time": "N/A",
-                "memory_usage": "N/A",
-                "security_level": "N/A"
-            }
-        
-        # Store execution result
-        result_entry = {
-            "code": code[:500],  # Store limited code for privacy
-            "code_hash": hashlib.md5(code.encode()).hexdigest(),
-            "result": execution_result,
-            "timestamp": datetime.now().isoformat(),
-            "language": language
-        }
-        
-        session_data["execution_results"].append(result_entry)
-        await db_manager.store_execution_result(session_id, result_entry)
-
-        session_data["execution_count"] += 1
-        
-        # Keep only last 20 execution results
-        if len(session_data["execution_results"]) > 20:
-            session_data["execution_results"] = session_data["execution_results"][-20:]
-        
-        # Send result back to client
-        response = {
-            "type": "execution_result",
-            "timestamp": result_entry["timestamp"],
-            "result": execution_result,
-            "session_stats": {
-                "total_executions": session_data["execution_count"],
-                "executions_remaining": 10 - session_data["execution_count"]
-            }
-        }
-        
-        await manager.send_personal_message(response, session_id)
-        
-    except ValueError as e:
-        await manager.send_personal_message({
-            "type": "error", 
-            "message": f"Invalid code: {str(e)}"
-        }, session_id)
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"{JUDGE0_URL}/about")
+            if response.status_code == 200:
+                return {
+                    "status": "online",
+                    "judge0_info": response.json(),
+                    "supported_languages": len(SUPPORTED_LANGUAGES),
+                    "rate_limit_status": "active"
+                }
+            else:
+                return {
+                    "status": "degraded",
+                    "message": f"Judge0 returned {response.status_code}"
+                }
     except Exception as e:
-        logger.error(f"Code execution error for session {session_id}: {e}")
-        await manager.send_personal_message({
-            "type": "error", 
-            "message": "Failed to execute code"
-        }, session_id)
-
-async def handle_audio_chunk(session_id: str, message: dict):
-    """ENHANCED AND FIXED: Audio chunk handler with comprehensive error handling"""
-    try:
-        logger.info(f"Processing audio chunk for session {session_id}")
-        logger.info(f"Message keys: {list(message.keys())}")
-        
-        # Extract and validate audio data
-        if 'audio_data' not in message:
-            logger.error("No 'audio_data' key in message!")
-            await manager.send_personal_message({
-                "type": "error",
-                "message": "No audio_data field in message",
-                "debug_info": {"received_keys": list(message.keys())}
-            }, session_id)
-            return
-        
-        audio_data_raw = message.get('audio_data')
-        audio_format = message.get("format", "webm")
-        duration = float(message.get("duration", 0))
-        
-        # Handle data URL format (data:audio/webm;base64,XXXXX)
-        if isinstance(audio_data_raw, str) and audio_data_raw.startswith('data:'):
-            try:
-                # Extract base64 part after comma
-                _, audio_data_b64 = audio_data_raw.split(',', 1)
-                logger.info(f"Extracted base64 from data URL, length: {len(audio_data_b64)}")
-            except ValueError:
-                logger.error("Invalid data URL format")
-                await manager.send_personal_message({
-                    "type": "error",
-                    "message": "Invalid data URL format"
-                }, session_id)
-                return
-        else:
-            audio_data_b64 = str(audio_data_raw)
-        
-        # Validate base64 data
-        if not audio_data_b64 or len(audio_data_b64) < 100:
-            logger.error(f"Audio data too short: {len(audio_data_b64)} chars")
-            await manager.send_personal_message({
-                "type": "error",
-                "message": f"Audio data too short: {len(audio_data_b64)} characters"
-            }, session_id)
-            return
-        
-        # Test base64 decoding
-        try:
-            decoded = base64.b64decode(audio_data_b64)
-            logger.info(f"Successfully decoded {len(decoded)} bytes of audio")
-            
-            if len(decoded) < 1000:  # Very small audio file
-                logger.warning(f"Decoded audio very small: {len(decoded)} bytes")
-        except Exception as e:
-            logger.error(f"Base64 decode failed: {e}")
-            await manager.send_personal_message({
-                "type": "error",
-                "message": f"Invalid base64 audio data: {str(e)}"
-            }, session_id)
-            return
-        
-        # Validate session exists
-        session_data = manager.session_data.get(session_id)
-        if not session_data:
-            logger.error(f"Session data not found for {session_id}")
-            await manager.send_personal_message({
-                "type": "error",
-                "message": "Session not found"
-            }, session_id)
-            return
-        
-        # Check duration limits
-        total_duration = session_data.get("total_audio_duration", 0)
-        if total_duration + duration > 1800:  # 30 minutes max
-            await manager.send_personal_message({
-                "type": "error",
-                "message": f"Audio duration limit exceeded (current: {total_duration}s)"
-            }, session_id)
-            return
-        
-        # Prepare audio entry with proper structure
-        timestamp = datetime.now()
-        audio_entry = {
-            "format": audio_format,
-            "timestamp": timestamp.isoformat(),
-            "duration": duration,
-            "size_bytes": len(audio_data_b64),
-            "audio_hash": hashlib.md5(audio_data_b64.encode()).hexdigest(),
-            "audio_data": audio_data_b64,
-            "chunk_index": len(session_data.get("audio_chunks", []))  # Add sequential index
+        return {
+            "status": "offline",
+            "error": str(e)
         }
-        
-        logger.info(f"Storing audio chunk - Format: {audio_format}, Duration: {duration}s, Size: {len(audio_data_b64)} chars")
-        
-        # Store in database with enhanced error handling
-        try:
-            chunk_id = await db_manager.store_audio_chunk(session_id, audio_entry)
-            logger.info(f"Database store operation result: {chunk_id}")
-            
-            if chunk_id is None:
-                raise Exception("Database returned None for chunk_id")
-            
-            if not isinstance(chunk_id, (int, str)) or (isinstance(chunk_id, str) and not chunk_id.strip()):
-                raise Exception(f"Invalid chunk_id returned: {chunk_id} (type: {type(chunk_id)})")
-                
-        except Exception as db_error:
-            logger.error(f"Database storage failed: {db_error}", exc_info=True)
-            await manager.send_personal_message({
-                "type": "error",
-                "message": f"Database storage failed: {str(db_error)}"
-            }, session_id)
-            return
-        
-        # Successful storage
-        logger.info(f"Successfully stored audio chunk with ID: {chunk_id}")
-        
-        # Update session tracking
-        session_data["audio_chunks"].append({
-            "chunk_id": chunk_id,
-            "timestamp": timestamp.isoformat(),
-            "duration": duration,
-            "format": audio_format
-        })
-        session_data["total_audio_duration"] = total_duration + duration
-        
-        # Trigger processing
-        logger.info(f"Triggering audio processing for chunk {chunk_id}")
-        asyncio.create_task(process_audio_chunk_from_db(str(chunk_id)))
-        
-        # Send success response
-        await manager.send_personal_message({
-            "type": "audio_received",
-            "timestamp": timestamp.isoformat(),
-            "chunk_id": chunk_id,
-            "message": "Audio chunk stored and processing started",
-            "session_stats": {
-                "total_audio_chunks": len(session_data["audio_chunks"]),
-                "total_duration": session_data["total_audio_duration"],
-                "remaining_duration": 1800 - session_data["total_audio_duration"]
-            }
-        }, session_id)
-        
-        logger.info(f"Audio chunk processing completed successfully for session {session_id}")
-        
-    except Exception as e:
-        logger.error(f"Critical error in handle_audio_chunk: {e}", exc_info=True)
-        await manager.send_personal_message({
-            "type": "error",
-            "message": f"Failed to process audio: {str(e)}",
-            "error_type": type(e).__name__
-        }, session_id)
 
-# API Endpoints
-
-# Add this test endpoint to main.py
 @app.get("/api/test/database")
 async def test_database():
     try:
@@ -882,16 +1050,14 @@ async def trigger_audio_processing(session_id: str):
         if session_id not in manager.session_data:
             raise HTTPException(status_code=404, detail="Session not found")
         
-        # Get pending chunks for this session
         response = await db_manager.get_audio_chunks_metadata(session_id)
         pending_chunks = [chunk for chunk in response if chunk.get('processing_status') == 'pending']
         
         if not pending_chunks:
             return {"message": "No pending audio chunks found", "processed": 0}
         
-        # Process chunks
         processed_count = 0
-        for chunk in pending_chunks[:5]:  # Process max 5 at a time
+        for chunk in pending_chunks[:5]:
             chunk_id = chunk['id']
             success = await process_audio_chunk_from_db(chunk_id)
             if success:
@@ -964,24 +1130,12 @@ async def process_all_pending_audio():
         logger.error(f"Error triggering background processing: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# New endpoints for transcript generation and sandbox snapshots
-
 @app.post("/process_chunk/{chunk_id}")
 async def process_chunk_transcript(chunk_id: str, session_id: str = None):
-    """
-    Generate transcript for a given audio chunk.
-    
-    Args:
-        chunk_id: The ID of the audio chunk to process
-        session_id: Optional session ID (will be fetched from database if not provided)
-    
-    Returns:
-        Dict containing transcript information and file path
-    """
+    """Generate transcript for a given audio chunk"""
     try:
         logger.info(f"Processing transcript for chunk {chunk_id}")
         
-        # If session_id not provided, fetch it from database
         if not session_id:
             try:
                 from database_manager import supabase
@@ -997,7 +1151,6 @@ async def process_chunk_transcript(chunk_id: str, session_id: str = None):
                 logger.error(f"Error fetching session_id for chunk {chunk_id}: {e}")
                 raise HTTPException(status_code=404, detail=f"Audio chunk {chunk_id} not found")
         
-        # Generate transcript
         result = await transcript_service.generate_transcript_for_chunk(chunk_id, session_id)
         
         if result["success"]:
@@ -1019,12 +1172,7 @@ async def process_chunk_transcript(chunk_id: str, session_id: str = None):
 
 @app.get("/sandbox_snapshot")
 async def get_sandbox_snapshot():
-    """
-    Get the most recent sandbox snapshot.
-    
-    Returns:
-        Dict containing the latest snapshot data
-    """
+    """Get the most recent sandbox snapshot"""
     try:
         logger.info("Retrieving latest sandbox snapshot")
         
@@ -1051,15 +1199,7 @@ async def get_sandbox_snapshot():
 
 @app.get("/sandbox_snapshot/{snapshot_id}")
 async def get_snapshot_by_id(snapshot_id: str):
-    """
-    Get a specific snapshot by ID.
-    
-    Args:
-        snapshot_id: The ID of the snapshot to retrieve
-    
-    Returns:
-        Dict containing the snapshot data
-    """
+    """Get a specific snapshot by ID"""
     try:
         logger.info(f"Retrieving snapshot: {snapshot_id}")
         
@@ -1084,12 +1224,7 @@ async def get_snapshot_by_id(snapshot_id: str):
 
 @app.get("/sandbox_snapshots")
 async def list_snapshots():
-    """
-    List all available snapshots.
-    
-    Returns:
-        Dict containing list of all snapshots
-    """
+    """List all available snapshots"""
     try:
         logger.info("Listing all snapshots")
         
@@ -1110,18 +1245,13 @@ async def list_snapshots():
 
 @app.post("/sandbox_snapshot/trigger")
 async def trigger_snapshot():
-    """
-    Manually trigger a snapshot creation.
-    
-    Returns:
-        Dict containing the new snapshot data
-    """
+    """Manually trigger a snapshot creation"""
     try:
         logger.info("Manually triggering snapshot creation")
         
         snapshot = await snapshot_service.take_snapshot()
         
-        if snapshot.get("success", True):  # Default to True if success key not present
+        if snapshot.get("success", True):
             logger.info(f"Snapshot created successfully: {snapshot.get('snapshot_id')}")
             return {
                 "success": True,
@@ -1140,16 +1270,7 @@ async def trigger_snapshot():
 
 @app.get("/transcript/{session_id}/{chunk_id}")
 async def get_transcript_file(session_id: str, chunk_id: str):
-    """
-    Get transcript file information for a specific chunk.
-    
-    Args:
-        session_id: The session ID
-        chunk_id: The chunk ID
-    
-    Returns:
-        Dict containing transcript file information
-    """
+    """Get transcript file information for a specific chunk"""
     try:
         logger.info(f"Getting transcript file for {session_id}/{chunk_id}")
         
@@ -1172,15 +1293,7 @@ async def get_transcript_file(session_id: str, chunk_id: str):
 
 @app.get("/transcripts/{session_id}")
 async def list_session_transcripts(session_id: str):
-    """
-    List all transcript files for a session.
-    
-    Args:
-        session_id: The session ID
-    
-    Returns:
-        Dict containing list of transcript files
-    """
+    """List all transcript files for a session"""
     try:
         logger.info(f"Listing transcripts for session {session_id}")
         
@@ -1220,7 +1333,7 @@ async def health_check():
                 "disk_free_gb": round(disk.free / (1024**3), 2),
                 "disk_percent": round(disk.used / disk.total * 100, 2)
             },
-            "sandbox_mode": "docker" if not sandbox.fallback_mode else "restricted_fallback"
+            "judge0_integration": "enabled"
         }
     except Exception as e:
         return {
@@ -1238,7 +1351,6 @@ async def get_session_data(session_id: str):
         
         session_data = manager.session_data[session_id].copy()
         
-        # Handle datetime conversion safely
         if isinstance(session_data.get("connected_at"), datetime):
             session_data["connected_at"] = session_data["connected_at"].isoformat()
             
@@ -1248,11 +1360,10 @@ async def get_session_data(session_id: str):
         if isinstance(session_data.get("disconnected_at"), datetime):
             session_data["disconnected_at"] = session_data["disconnected_at"].isoformat()
             
-        # Remove sensitive data
         if "code_history" in session_data:
             session_data["code_history"] = [
                 {k: v for k, v in entry.items() if k != "code"}
-                for entry in session_data["code_history"][-10:]  # Last 10 only
+                for entry in session_data["code_history"][-10:]
             ]
         
         if "execution_results" in session_data:
@@ -1261,7 +1372,6 @@ async def get_session_data(session_id: str):
                 for entry in session_data["execution_results"][-10:]
             ]
         
-        # Remove actual audio data
         if "audio_chunks" in session_data:
             session_data["audio_chunks"] = [
                 {k: v for k, v in entry.items() if k != "audio_data"}
@@ -1286,46 +1396,68 @@ async def list_sessions():
         "server_capacity": f"{len(manager.active_connections)}/{manager.max_sessions}"
     }
 
-# FIXED: Single set of routes without duplicates
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
     """Serve the home/welcome page"""
-    return FileResponse('templates/home.html')
+    if os.path.exists('templates/home.html'):
+        return FileResponse('templates/home.html')
+    else:
+        return HTMLResponse("""
+        <html><head><title>CodeSage AI Interviewer</title></head>
+        <body><h1>CodeSage AI Interviewer</h1>
+        <p>Welcome! The server is running with Judge0 integration.</p>
+        <p><a href="/interview">Start Interview</a> | <a href="/monitor">Monitor</a></p>
+        </body></html>
+        """)
 
 @app.get("/home", response_class=HTMLResponse)  
 async def serve_home():
     """Serve the home page (alias for root)"""
-    return FileResponse('templates/home.html')
+    return await read_root()
 
 @app.get("/interview", response_class=HTMLResponse)
 async def serve_interview():
     """Serve the interview interface"""
-    return FileResponse('templates/index.html')
+    if os.path.exists('templates/index.html'):
+        return FileResponse('templates/index.html')
+    else:
+        return HTMLResponse("""
+        <html><head><title>Interview Interface</title></head>
+        <body><h1>Interview Interface</h1>
+        <p>Interview interface would be here. Template file missing.</p>
+        <p><a href="/">Back to Home</a></p>
+        </body></html>
+        """)
 
 @app.get("/monitor")
 async def serve_monitor():
     """Serve the monitoring dashboard"""
-    return FileResponse('templates/monitor.html')
+    if os.path.exists('templates/monitor.html'):
+        return FileResponse('templates/monitor.html')
+    else:
+        return HTMLResponse("""
+        <html><head><title>System Monitor</title></head>
+        <body><h1>System Monitor</h1>
+        <p>Monitor dashboard would be here. Template file missing.</p>
+        <p><a href="/health">Health Check</a> | <a href="/sessions">Sessions</a></p>
+        </body></html>
+        """)
 
 @app.get("/favicon.ico")
 async def favicon():
     """Handle favicon requests"""
     return Response(status_code=204)
 
-# Audio retrieval endpoints
 @app.get("/api/session/{session_id}/audio/{chunk_index}")
 async def get_audio_chunk(session_id: str, chunk_index: int):
     """Retrieve a specific audio chunk from the database"""
     try:
-        # Validate session exists
         if session_id not in manager.session_data:
             raise HTTPException(status_code=404, detail="Session not found")
         
-        # Validate chunk index
         if chunk_index < 0:
             raise HTTPException(status_code=400, detail="Invalid chunk index")
         
-        # Get audio chunk from database
         try:
             audio_data = await db_manager.get_audio_chunk(session_id, chunk_index)
         except Exception as e:
@@ -1335,7 +1467,6 @@ async def get_audio_chunk(session_id: str, chunk_index: int):
         if not audio_data:
             raise HTTPException(status_code=404, detail="Audio chunk not found")
         
-        # Extract audio information
         audio_format = audio_data.get('format', 'webm')
         audio_base64 = audio_data.get('audio_data', '')
         timestamp = audio_data.get('timestamp', '')
@@ -1344,14 +1475,12 @@ async def get_audio_chunk(session_id: str, chunk_index: int):
         if not audio_base64:
             raise HTTPException(status_code=404, detail="Audio data not found")
         
-        # Decode base64 audio data
         try:
             audio_bytes = base64.b64decode(audio_base64)
         except Exception as e:
             logger.error(f"Failed to decode audio data for chunk {chunk_index}: {e}")
             raise HTTPException(status_code=500, detail="Invalid audio data encoding")
         
-        # Determine content type based on format
         content_type_map = {
             'webm': 'audio/webm',
             'mp3': 'audio/mpeg',
@@ -1360,7 +1489,6 @@ async def get_audio_chunk(session_id: str, chunk_index: int):
         }
         content_type = content_type_map.get(audio_format.lower(), 'audio/webm')
         
-        # Create response with proper headers
         response = Response(
             content=audio_bytes,
             media_type=content_type,
@@ -1384,7 +1512,6 @@ async def get_audio_chunk(session_id: str, chunk_index: int):
         logger.error(f"Unexpected error retrieving audio chunk {chunk_index} for session {session_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-# Additional API endpoints for monitoring and analytics
 @app.get("/api/sessions/detailed")
 async def get_detailed_sessions():
     """Get detailed information about all sessions"""
@@ -1393,7 +1520,6 @@ async def get_detailed_sessions():
     for session_id, session_data in manager.session_data.items():
         is_active = session_id in manager.active_connections
         
-        # Calculate session metrics
         code_history = session_data.get("code_history", [])
         execution_results = session_data.get("execution_results", [])
         audio_chunks = session_data.get("audio_chunks", [])
@@ -1402,7 +1528,7 @@ async def get_detailed_sessions():
         if code_history:
             latest_code = code_history[-1].get("code", "")
             if latest_code:
-                analysis = analyzer.analyze_code(latest_code)
+                analysis = code_analyzer.analyze_code(latest_code)
                 latest_quality_score = analysis.get("code_quality_score", 0)
         
         detailed_sessions[session_id] = {
@@ -1422,7 +1548,7 @@ async def get_detailed_sessions():
                 "latest_quality_score": latest_quality_score
             },
             "resource_usage": session_data.get("resource_usage", {}),
-            "security_level": "Docker Sandboxed" if not sandbox.fallback_mode else "Restricted Fallback"
+            "security_level": "Judge0 Sandboxed"
         }
     
     return {
@@ -1430,7 +1556,7 @@ async def get_detailed_sessions():
         "total_active": len(manager.active_connections),
         "total_stored": len(manager.session_data),
         "server_stats": {
-            "sandbox_mode": "docker" if not sandbox.fallback_mode else "restricted_fallback",
+            "judge0_integration": "enabled",
             "rate_limiter_active": True,
             "cleanup_enabled": True
         }
@@ -1464,16 +1590,17 @@ async def general_exception_handler(request, exc):
 
 if __name__ == "__main__":
     logger.info("Starting CodeSage AI Interviewer Enhanced Server...")
-    logger.info(f"Sandbox mode: {'Docker' if not sandbox.fallback_mode else 'Restricted Fallback'}")
+    logger.info(f"Judge0 integration: Enabled")
     logger.info(f"Max concurrent sessions: {manager.max_sessions}")
     logger.info(f"Session TTL: {manager.session_ttl}")
+    logger.info(f"Supported languages: {list(SUPPORTED_LANGUAGES.keys())}")
     
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=8000,
-        reload=False,  # Disable reload in production
+        reload=False,
         log_level="info",
         access_log=True,
-        workers=1  # WebSocket applications should use single worker
+        workers=1
     )
