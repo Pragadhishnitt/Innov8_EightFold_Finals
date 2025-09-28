@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+websockets 
+python-multipart
+supabase
+python-dotenv
+httpx
+pydantic
+docker
+pytest
+psutil
+google-generativeai
+aiohttp

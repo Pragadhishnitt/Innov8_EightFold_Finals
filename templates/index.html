@@ -1,0 +1,1594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CodeSage - AI Technical Interviewer</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary-bg: #0d1117;
+            --secondary-bg: #161b22;
+            --tertiary-bg: #21262d;
+            --accent-bg: #30363d;
+            --primary-blue: #58a6ff;
+            --secondary-blue: #1f6feb;
+            --success-green: #238636;
+            --warning-orange: #d29922;
+            --error-red: #f85149;
+            --text-primary: #f0f6fc;
+            --text-secondary: #8b949e;
+            --text-muted: #6e7681;
+            --border-color: #30363d;
+            --glow-blue: rgba(88, 166, 255, 0.3);
+            --glow-green: rgba(35, 134, 54, 0.3);
+            --glow-red: rgba(248, 81, 73, 0.3);
+            --glow-orange: rgba(255, 140, 66, 0.3);
+        }
+
+        body {
+            font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
+            background: linear-gradient(135deg, var(--primary-bg) 0%, #0a0e14 100%);
+            color: var(--text-primary);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Animated background */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at 20% 50%, rgba(88, 166, 255, 0.05) 0%, transparent 50%),
+                        radial-gradient(circle at 80% 20%, rgba(35, 134, 54, 0.05) 0%, transparent 50%),
+                        radial-gradient(circle at 40% 80%, rgba(248, 81, 73, 0.05) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        .header {
+            background: rgba(22, 27, 34, 0.95);
+            backdrop-filter: blur(20px);
+            padding: 1.2rem 2rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: relative;
+            z-index: 100;
+        }
+
+        .header::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--primary-blue), transparent);
+        }
+
+        .header h1 {
+            color: var(--text-primary);
+            font-size: 1.6rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+        }
+
+        .header h1 i {
+            color: var(--primary-blue);
+            font-size: 1.4rem;
+            filter: drop-shadow(0 0 8px var(--glow-blue));
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            background: var(--tertiary-bg);
+            padding: 0.6rem 1.2rem;
+            border-radius: 20px;
+            border: 1px solid var(--border-color);
+            transition: all 0.3s ease;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: var(--error-red);
+            transition: all 0.3s ease;
+            box-shadow: 0 0 8px currentColor;
+        }
+
+        .status-dot.connected {
+            background-color: var(--success-green);
+            box-shadow: 0 0 12px var(--glow-green);
+        }
+
+        .status-text {
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        .main-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            gap: 1px;
+        }
+
+        .code-section {
+            flex: 2;
+            display: flex;
+            flex-direction: column;
+            background: var(--secondary-bg);
+            border-radius: 12px 0 0 0;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .code-header {
+            background: var(--tertiary-bg);
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, var(--primary-blue), var(--secondary-blue));
+            color: white;
+            border: none;
+            padding: 0.7rem 1.5rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(88, 166, 255, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            background: var(--accent-bg);
+            color: var(--text-muted);
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .btn.vad-listening {
+            background: linear-gradient(135deg, var(--success-green), #20c997);
+            animation: pulse-listening 2s infinite;
+        }
+
+        .btn.vad-recording {
+            background: linear-gradient(135deg, var(--warning-orange), #ff8c42);
+            animation: pulse-recording 1.5s infinite;
+        }
+
+        @keyframes pulse-listening {
+            0%, 100% { box-shadow: 0 0 15px var(--glow-green); }
+            50% { box-shadow: 0 0 25px var(--glow-green), 0 0 35px var(--glow-green); }
+        }
+
+        @keyframes pulse-recording {
+            0%, 100% { box-shadow: 0 0 20px var(--glow-orange); }
+            50% { box-shadow: 0 0 30px var(--glow-orange), 0 0 40px var(--glow-orange); }
+        }
+
+        .code-editor {
+            flex: 1;
+            background: var(--primary-bg);
+            border: none;
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            padding: 1.5rem;
+            resize: none;
+            outline: none;
+            tab-size: 4;
+            position: relative;
+        }
+
+        .code-editor::placeholder {
+            color: var(--text-muted);
+            font-style: italic;
+        }
+
+        .output-section {
+            height: 240px;
+            background: var(--secondary-bg);
+            border-top: 1px solid var(--border-color);
+            padding: 1.5rem;
+            overflow-y: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            position: relative;
+        }
+
+        .output-section::before {
+            content: 'Output Console';
+            position: absolute;
+            top: 0.5rem;
+            left: 1.5rem;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .output-section pre {
+            margin-top: 1.5rem;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .feedback-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--secondary-bg);
+            border-radius: 0 12px 0 0;
+            overflow: hidden;
+        }
+
+        .feedback-header {
+            background: var(--tertiary-bg);
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+        }
+
+        .feedback-header h3 {
+            color: var(--text-primary);
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .feedback-header i {
+            color: var(--primary-blue);
+            font-size: 1.2rem;
+        }
+
+        .feedback-content {
+            flex: 1;
+            padding: 1.5rem;
+            overflow-y: auto;
+            scroll-behavior: smooth;
+        }
+
+        .analysis-item {
+            background: linear-gradient(135deg, var(--tertiary-bg), var(--accent-bg));
+            margin-bottom: 1.5rem;
+            padding: 1.5rem;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            position: relative;
+            transition: all 0.3s ease;
+        }
+
+        .analysis-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+        }
+
+        .analysis-item::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: linear-gradient(180deg, var(--primary-blue), var(--secondary-blue));
+            border-radius: 0 4px 4px 0;
+        }
+
+        .analysis-item h4 {
+            color: var(--primary-blue);
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .suggestion {
+            background: linear-gradient(135deg, rgba(35, 134, 54, 0.2), rgba(35, 134, 54, 0.1));
+            padding: 1rem;
+            margin: 0.8rem 0;
+            border-radius: 8px;
+            border-left: 3px solid var(--success-green);
+            position: relative;
+            transition: all 0.3s ease;
+        }
+
+        .suggestion:hover {
+            transform: translateX(4px);
+            box-shadow: 0 4px 15px var(--glow-green);
+        }
+
+        .error {
+            background: linear-gradient(135deg, rgba(248, 81, 73, 0.2), rgba(248, 81, 73, 0.1));
+            padding: 1rem;
+            margin: 0.8rem 0;
+            border-radius: 8px;
+            border-left: 3px solid var(--error-red);
+            position: relative;
+            transition: all 0.3s ease;
+        }
+
+        .error:hover {
+            transform: translateX(4px);
+            box-shadow: 0 4px 15px var(--glow-red);
+        }
+
+        /* Enhanced Audio Controls with VAD */
+        .audio-controls {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            background: var(--accent-bg);
+            padding: 0.8rem 1.2rem;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            flex-wrap: wrap;
+            min-width: 300px;
+        }
+
+        .vad-controls {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            padding: 0.5rem;
+            background: var(--tertiary-bg);
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            min-width: 200px;
+        }
+
+        .volume-indicator {
+            position: relative;
+            width: 80px;
+            height: 12px;
+            background: var(--accent-bg);
+            border-radius: 6px;
+            overflow: visible;
+            border: 1px solid var(--border-color);
+        }
+
+        .volume-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--success-green), var(--warning-orange), var(--error-red));
+            width: 0%;
+            transition: width 0.1s ease;
+            border-radius: 6px;
+            position: relative;
+        }
+
+        .volume-bar.voice-detected {
+            box-shadow: 0 0 8px var(--glow-green);
+            background: linear-gradient(90deg, var(--success-green), var(--warning-orange), var(--error-red));
+            animation: voice-pulse 0.5s infinite alternate;
+        }
+
+        @keyframes voice-pulse {
+            0% { transform: scaleY(1); }
+            100% { transform: scaleY(1.2); }
+        }
+
+        .volume-bar.silence-detected {
+            opacity: 0.6;
+            filter: grayscale(0.3);
+        }
+
+        .vad-threshold {
+            position: absolute;
+            top: -2px;
+            height: calc(100% + 4px);
+            width: 2px;
+            background: var(--warning-orange);
+            border-radius: 1px;
+            transition: left 0.3s ease;
+            box-shadow: 0 0 4px var(--warning-orange);
+        }
+
+        .vad-threshold::after {
+            content: '';
+            position: absolute;
+            top: -4px;
+            left: -2px;
+            width: 6px;
+            height: 6px;
+            background: var(--warning-orange);
+            border-radius: 50%;
+            box-shadow: 0 0 6px var(--warning-orange);
+        }
+
+        .vad-sensitivity {
+            display: flex;
+            flex-direction: column;
+            gap: 0.3rem;
+            align-items: center;
+        }
+
+        .vad-sensitivity label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        .vad-sensitivity input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 60px;
+            height: 4px;
+            background: var(--accent-bg);
+            border-radius: 2px;
+            border: 1px solid var(--border-color);
+        }
+
+        .vad-sensitivity input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 12px;
+            height: 12px;
+            background: var(--primary-blue);
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 0 4px var(--glow-blue);
+        }
+
+        .vad-sensitivity input[type="range"]::-moz-range-thumb {
+            width: 12px;
+            height: 12px;
+            background: var(--primary-blue);
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 0 4px var(--glow-blue);
+        }
+
+        .sensitivity-value {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            text-align: center;
+            font-weight: 600;
+        }
+
+        .vad-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .vad-status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--text-muted);
+            transition: all 0.3s ease;
+        }
+
+        .vad-status-dot.listening {
+            background: var(--success-green);
+            box-shadow: 0 0 8px var(--glow-green);
+        }
+
+        .vad-status-dot.recording {
+            background: var(--warning-orange);
+            box-shadow: 0 0 8px var(--glow-orange);
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0.3; }
+        }
+
+        .session-info {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: var(--accent-bg);
+            padding: 0.6rem 1rem;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            font-family: monospace;
+        }
+
+        .session-info i {
+            color: var(--primary-blue);
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--tertiary-bg);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: linear-gradient(180deg, var(--primary-blue), var(--secondary-blue));
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(180deg, var(--secondary-blue), var(--primary-blue));
+        }
+
+        /* Loading animation */
+        .loading {
+            position: relative;
+        }
+
+        .loading::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            right: 1rem;
+            width: 16px;
+            height: 16px;
+            border: 2px solid transparent;
+            border-top: 2px solid currentColor;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Success states */
+        .success-indicator {
+            color: var(--success-green);
+            filter: drop-shadow(0 0 4px var(--glow-green));
+        }
+
+        .error-indicator {
+            color: var(--error-red);
+            filter: drop-shadow(0 0 4px var(--glow-red));
+        }
+
+        /* Responsive design */
+        @media (max-width: 1200px) {
+            .main-container {
+                flex-direction: column;
+            }
+            
+            .code-section, .feedback-section {
+                flex: none;
+            }
+            
+            .code-section {
+                height: 60vh;
+            }
+            
+            .feedback-section {
+                height: 40vh;
+            }
+
+            .audio-controls {
+                min-width: auto;
+            }
+
+            .vad-controls {
+                min-width: auto;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .header {
+                padding: 1rem;
+                flex-direction: column;
+                gap: 1rem;
+            }
+            
+            .code-header {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 0.8rem;
+            }
+            
+            .audio-controls {
+                justify-content: center;
+                flex-wrap: wrap;
+            }
+
+            .volume-indicator {
+                width: 60px;
+            }
+        }
+
+        /* Floating action elements */
+        .floating-element {
+            position: relative;
+            animation: float 6s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+        }
+
+        /* Notification system */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: var(--tertiary-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1rem 1.5rem;
+            max-width: 300px;
+            z-index: 1000;
+            transform: translateX(100%);
+            opacity: 0;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .notification.show {
+            transform: translateX(0);
+            opacity: 1;
+        }
+
+        .notification.success {
+            border-left: 4px solid var(--success-green);
+            box-shadow: 0 4px 20px var(--glow-green);
+        }
+
+        .notification.error {
+            border-left: 4px solid var(--error-red);
+            box-shadow: 0 4px 20px var(--glow-red);
+        }
+
+        .notification.info {
+            border-left: 4px solid var(--primary-blue);
+            box-shadow: 0 4px 20px var(--glow-blue);
+        }
+    </style>
+</head>
+<body>
+    <div class="header floating-element">
+        <h1>
+            <i class="fas fa-brain"></i>
+            CodeSage AI Interviewer
+        </h1>
+        <div class="connection-status">
+            <div class="status-dot" id="statusDot"></div>
+            <span class="status-text" id="statusText">Connecting...</span>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="code-section">
+            <div class="code-header">
+                <button class="btn" id="runBtn" onclick="executeCode()">
+                    <i class="fas fa-play"></i>
+                    Run Code
+                </button>
+                
+                <div class="audio-controls">
+                    <button class="btn vad-listening" id="vadBtn" onclick="toggleVAD()">
+                        <i class="fas fa-ear-listen"></i>
+                        <span id="vadText">Voice Detection Active</span>
+                    </button>
+                    
+                    <div class="vad-controls">
+                        <div class="volume-indicator" title="Voice Level & Detection Threshold">
+                            <div class="volume-bar" id="volumeBar"></div>
+                            <div class="vad-threshold" id="vadThreshold"></div>
+                        </div>
+                        
+                        <div class="vad-sensitivity">
+                            <label>Sensitivity</label>
+                            <input type="range" id="vadSensitivity" min="10" max="80" value="30" 
+                                   oninput="adjustVadSensitivity(this.value)">
+                            <span class="sensitivity-value" id="sensitivityValue">30%</span>
+                        </div>
+                    </div>
+
+                    <div class="vad-status">
+                        <div class="vad-status-dot" id="vadStatusDot"></div>
+                        <span id="vadStatusText">Listening for voice...</span>
+                    </div>
+                </div>
+                
+                <div class="session-info">
+                    <i class="fas fa-fingerprint"></i>
+                    <span id="sessionId">Session: Initializing...</span>
+                </div>
+            </div>
+            
+            <textarea 
+                class="code-editor" 
+                id="codeEditor" 
+                placeholder="# Welcome to CodeSage! Start coding here...
+# Example: Implement a function to find duplicates in an array
+
+def find_duplicates(arr):
+    # Your solution here
+    duplicates = []
+    seen = set()
+    
+    for item in arr:
+        if item in seen and item not in duplicates:
+            duplicates.append(item)
+        seen.add(item)
+    
+    return duplicates
+
+# Test your function
+test_array = [1, 2, 3, 2, 4, 5, 3, 1]
+result = find_duplicates(test_array)
+print(f'Duplicates found: {result}')"></textarea>
+            
+            <div class="output-section" id="outputSection">
+                <div style="margin-top: 1.5rem; color: var(--text-muted); font-style: italic;">
+                    💡 Click "Run Code" to execute your solution and see the output here...
+                </div>
+            </div>
+        </div>
+
+        <div class="feedback-section">
+            <div class="feedback-header">
+                <i class="fas fa-robot"></i>
+                <h3>AI Analysis & Feedback</h3>
+            </div>
+            <div class="feedback-content" id="feedbackContent">
+                <div class="analysis-item">
+                    <h4>
+                        <i class="fas fa-rocket"></i>
+                        Welcome to Your Interview!
+                    </h4>
+                    <p>Hello! I'm CodeSage, your AI technical interviewer. I'm here to help you showcase your coding skills through an interactive session.</p>
+                    <br>
+                    <p><strong>Voice Detection is Active:</strong></p>
+                    <ul style="margin: 1rem 0; padding-left: 1.5rem; color: var(--text-secondary);">
+                        <li>I'm automatically listening for your voice</li>
+                        <li>Start speaking and recording will begin automatically</li>
+                        <li>Adjust sensitivity if needed for your environment</li>
+                        <li>Write your code and explain your thought process aloud</li>
+                    </ul>
+                    <p style="color: var(--primary-blue); font-weight: 500;">Ready to begin? Start coding and let's see what you can build! 🚀</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification container -->
+    <div id="notificationContainer"></div>
+
+    <script>
+        class CodeSageClient {
+            constructor() {
+                this.ws = null;
+                this.mediaRecorder = null;
+                this.audioChunks = [];
+                this.sessionId = this.getSessionIdFromUrl() || this.generateNewSessionId();
+                this.reconnectAttempts = 0;
+                this.maxReconnectAttempts = 5;
+                this.lastCodeUpdate = '';
+                
+                // VAD Configuration
+                this.isVadEnabled = true;  // Start with VAD enabled
+                this.isRecording = false;
+                this.vadThreshold = 30;
+                this.vadStartDelay = 300;    // Shorter delay for responsiveness
+                this.vadStopDelay = 1500;    // Stop after 1.5s of silence
+                this.vadTimeoutId = null;
+                this.vadStartTimeoutId = null;
+                this.consecutiveSilenceFrames = 0;
+                this.consecutiveVoiceFrames = 0;
+                this.requiredVoiceFrames = 5;   // Need 5 frames to start
+                this.requiredSilenceFrames = 30; // Need 30 frames to stop
+                this.currentVolumePercent = 0;
+                
+                this.init();
+            }
+
+            getSessionIdFromUrl() {
+                // This function checks the URL for a session_id parameter
+                const urlParams = new URLSearchParams(window.location.search);
+                return urlParams.get('session_id');
+            }
+
+            generateNewSessionId() {
+                // This is your original function, just renamed
+                return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            }
+
+            init() {
+                this.connectWebSocket();
+                this.setupEventListeners();
+                this.setupAudioCapture();
+                this.initializeVADUI();
+                
+                // Update session ID display
+                document.getElementById('sessionId').textContent = `Session: ${this.sessionId.slice(-8)}`;
+            }
+
+            initializeVADUI() {
+                // Set initial threshold position
+                const vadThreshold = document.getElementById('vadThreshold');
+                const sensitivityValue = document.getElementById('sensitivityValue');
+                
+                if (vadThreshold) {
+                    vadThreshold.style.left = `${this.vadThreshold}%`;
+                }
+                
+                if (sensitivityValue) {
+                    sensitivityValue.textContent = `${this.vadThreshold}%`;
+                }
+
+                // Update VAD status
+                this.updateVADStatus('listening', 'Listening for voice...');
+            }
+
+            connectWebSocket() {
+                try {
+                    const wsUrl = `ws://localhost:8000/ws/${this.sessionId}`;
+                    this.ws = new WebSocket(wsUrl);
+
+                    this.ws.onopen = (event) => {
+                        console.log('WebSocket connected');
+                        this.updateConnectionStatus(true);
+                        this.reconnectAttempts = 0;
+                        this.showNotification('Connected to CodeSage AI! Voice detection is active.', 'success');
+                        
+                        // Send initial ping
+                        this.sendMessage({
+                            type: 'ping',
+                            timestamp: new Date().toISOString()
+                        });
+                    };
+
+                    this.ws.onmessage = (event) => {
+                        const message = JSON.parse(event.data);
+                        this.handleMessage(message);
+                    };
+
+                    this.ws.onclose = (event) => {
+                        console.log('WebSocket disconnected');
+                        this.updateConnectionStatus(false);
+                        this.handleReconnection();
+                    };
+
+                    this.ws.onerror = (error) => {
+                        console.error('WebSocket error:', error);
+                        this.showNotification('Connection error occurred', 'error');
+                    };
+
+                } catch (error) {
+                    console.error('Failed to connect WebSocket:', error);
+                    this.updateConnectionStatus(false);
+                    this.showNotification('Failed to connect to server', 'error');
+                }
+            }
+
+            handleReconnection() {
+                if (this.reconnectAttempts < this.maxReconnectAttempts) {
+                    this.reconnectAttempts++;
+                    this.showNotification(`Reconnecting... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`, 'info');
+                    
+                    setTimeout(() => {
+                        this.connectWebSocket();
+                    }, 2000 * this.reconnectAttempts);
+                } else {
+                    this.showNotification('Connection failed. Please refresh the page.', 'error');
+                }
+            }
+
+            updateConnectionStatus(connected) {
+                const statusDot = document.getElementById('statusDot');
+                const statusText = document.getElementById('statusText');
+                
+                if (connected) {
+                    statusDot.classList.add('connected');
+                    statusText.textContent = 'Connected';
+                } else {
+                    statusDot.classList.remove('connected');
+                    statusText.textContent = 'Disconnected';
+                }
+            }
+
+            setupEventListeners() {
+                const codeEditor = document.getElementById('codeEditor');
+                
+                // Handle Tab key for proper indentation
+                codeEditor.addEventListener('keydown', (e) => {
+                    if (e.key === 'Tab') {
+                        e.preventDefault();
+                        
+                        const start = codeEditor.selectionStart;
+                        const end = codeEditor.selectionEnd;
+                        const value = codeEditor.value;
+                        
+                        if (e.shiftKey) {
+                            // Shift+Tab: Remove indentation
+                            const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+                            const lineEnd = value.indexOf('\n', start);
+                            const currentLine = value.substring(lineStart, lineEnd === -1 ? value.length : lineEnd);
+                            
+                            if (currentLine.startsWith('    ')) {
+                                codeEditor.value = value.substring(0, lineStart) + currentLine.substring(4) + value.substring(lineEnd === -1 ? value.length : lineEnd);
+                                codeEditor.selectionStart = codeEditor.selectionEnd = start - 4;
+                            } else if (currentLine.startsWith('\t')) {
+                                codeEditor.value = value.substring(0, lineStart) + currentLine.substring(1) + value.substring(lineEnd === -1 ? value.length : lineEnd);
+                                codeEditor.selectionStart = codeEditor.selectionEnd = start - 1;
+                            }
+                        } else {
+                            // Tab: Add 4 spaces
+                            codeEditor.value = value.substring(0, start) + '    ' + value.substring(end);
+                            codeEditor.selectionStart = codeEditor.selectionEnd = start + 4;
+                        }
+                        
+                        codeEditor.dispatchEvent(new Event('input'));
+                    }
+                    
+                    // Handle Enter key for auto-indentation
+                    if (e.key === 'Enter') {
+                        const start = codeEditor.selectionStart;
+                        const value = codeEditor.value;
+                        const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+                        const currentLine = value.substring(lineStart, start);
+                        
+                        const indentMatch = currentLine.match(/^(\s*)/);
+                        let indent = indentMatch ? indentMatch[1] : '';
+                        
+                        if (currentLine.trim().endsWith(':')) {
+                            indent += '    ';
+                        }
+                        
+                        setTimeout(() => {
+                            const newStart = codeEditor.selectionStart;
+                            codeEditor.value = codeEditor.value.substring(0, newStart) + indent + codeEditor.value.substring(newStart);
+                            codeEditor.selectionStart = codeEditor.selectionEnd = newStart + indent.length;
+                        }, 0);
+                    }
+                });
+                
+                // Send code updates with debouncing
+                let timeoutId;
+                codeEditor.addEventListener('input', () => {
+                    clearTimeout(timeoutId);
+                    timeoutId = setTimeout(() => {
+                        if (codeEditor.value !== this.lastCodeUpdate) {
+                            this.sendCodeUpdate();
+                            this.lastCodeUpdate = codeEditor.value;
+                        }
+                    }, 800);
+                });
+
+                codeEditor.addEventListener('focus', () => {
+                    codeEditor.style.boxShadow = `0 0 20px ${getComputedStyle(document.documentElement).getPropertyValue('--glow-blue')}`;
+                });
+
+                codeEditor.addEventListener('blur', () => {
+                    codeEditor.style.boxShadow = 'none';
+                });
+            }
+
+            setupAudioCapture() {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    console.warn('Audio capture not supported');
+                    this.showNotification('Audio capture not supported on this browser', 'error');
+                    this.isVadEnabled = false;
+                    this.updateVADStatus('disabled', 'Audio not available');
+                    return;
+                }
+
+                navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        sampleRate: 44100
+                    } 
+                })
+                .then(stream => {
+                    this.audioStream = stream;
+                    this.setupAudioAnalyzer(stream);
+                    console.log('Audio capture initialized - VAD active');
+                    this.showNotification('Voice detection active - speak to start recording!', 'success');
+                })
+                .catch(error => {
+                    console.error('Audio capture failed:', error);
+                    this.showNotification('Microphone access denied. VAD disabled.', 'error');
+                    this.isVadEnabled = false;
+                    this.updateVADStatus('disabled', 'Microphone access denied');
+                });
+            }
+
+            setupAudioAnalyzer(stream) {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const analyser = audioContext.createAnalyser();
+                const microphone = audioContext.createMediaStreamSource(stream);
+                microphone.connect(analyser);
+
+                analyser.fftSize = 512;
+                const bufferLength = analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+
+                const updateVolumeIndicator = () => {
+                    analyser.getByteFrequencyData(dataArray);
+                    const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+                    this.currentVolumePercent = Math.min((average / 128) * 100, 100);
+                    
+                    const volumeBar = document.getElementById('volumeBar');
+                    if (volumeBar) {
+                        volumeBar.style.width = `${this.currentVolumePercent}%`;
+                    }
+                    
+                    // Process VAD if enabled
+                    if (this.isVadEnabled && this.audioStream) {
+                        this.processVoiceActivity(this.currentVolumePercent);
+                    }
+                    
+                    requestAnimationFrame(updateVolumeIndicator);
+                };
+
+                updateVolumeIndicator();
+            }
+
+            processVoiceActivity(volumePercent) {
+                const isVoiceDetected = volumePercent > this.vadThreshold;
+                const volumeBar = document.getElementById('volumeBar');
+                
+                if (isVoiceDetected) {
+                    this.consecutiveVoiceFrames++;
+                    this.consecutiveSilenceFrames = 0;
+                    
+                    // Visual feedback for voice detection
+                    if (volumeBar) {
+                        volumeBar.classList.add('voice-detected');
+                        volumeBar.classList.remove('silence-detected');
+                    }
+                    
+                    // Start recording if voice detected for enough consecutive frames
+                    if (!this.isRecording && this.consecutiveVoiceFrames >= this.requiredVoiceFrames) {
+                        this.scheduleAutoRecordingStart();
+                    }
+                    
+                    // Clear any pending stop recording
+                    if (this.vadTimeoutId) {
+                        clearTimeout(this.vadTimeoutId);
+                        this.vadTimeoutId = null;
+                    }
+                    
+                } else {
+                    this.consecutiveSilenceFrames++;
+                    this.consecutiveVoiceFrames = 0;
+                    
+                    // Visual feedback for silence
+                    if (volumeBar) {
+                        volumeBar.classList.remove('voice-detected');
+                        volumeBar.classList.add('silence-detected');
+                    }
+                    
+                    // Stop recording if silence detected for enough consecutive frames
+                    if (this.isRecording && this.consecutiveSilenceFrames >= this.requiredSilenceFrames) {
+                        this.scheduleAutoRecordingStop();
+                    }
+                    
+                    // Clear any pending start recording
+                    if (this.vadStartTimeoutId) {
+                        clearTimeout(this.vadStartTimeoutId);
+                        this.vadStartTimeoutId = null;
+                    }
+                }
+            }
+
+            scheduleAutoRecordingStart() {
+                if (this.vadStartTimeoutId || this.isRecording) return;
+                
+                this.vadStartTimeoutId = setTimeout(() => {
+                    if (!this.isRecording && this.isVadEnabled && this.consecutiveVoiceFrames > 0) {
+                        console.log('Auto-starting recording due to voice detection');
+                        this.startAutoRecording();
+                    }
+                }, this.vadStartDelay);
+            }
+
+            scheduleAutoRecordingStop() {
+                if (this.vadTimeoutId || !this.isRecording) return;
+                
+                this.vadTimeoutId = setTimeout(() => {
+                    if (this.isRecording && this.isVadEnabled) {
+                        console.log('Auto-stopping recording due to silence');
+                        this.stopAutoRecording();
+                    }
+                }, this.vadStopDelay);
+            }
+
+            startAutoRecording() {
+                if (!this.audioStream || this.isRecording) return;
+                
+                console.log('Starting auto-recording...');
+                this.audioChunks = [];
+                
+                try {
+                    this.mediaRecorder = new MediaRecorder(this.audioStream, {
+                        mimeType: 'audio/webm;codecs=opus'
+                    });
+                    
+                    this.mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0) {
+                            this.audioChunks.push(event.data);
+                            console.log('Audio chunk collected:', event.data.size, 'bytes');
+                        }
+                    };
+                    
+                    this.mediaRecorder.onstop = () => {
+                        console.log('MediaRecorder stopped, processing audio...');
+                        if (this.audioChunks.length > 0) {
+                            const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
+                            this.sendAudioChunk(audioBlob);
+                        }
+                    };
+                    
+                    this.mediaRecorder.start(1000);
+                    this.isRecording = true;
+                    
+                    this.updateVADStatus('recording', 'Recording your voice...');
+                    this.showNotification('Auto-recording started - voice detected!', 'info');
+                    
+                } catch (error) {
+                    console.error('Failed to start recording:', error);
+                    this.showNotification('Failed to start recording', 'error');
+                }
+            }
+
+            stopAutoRecording() {
+                if (!this.isRecording || !this.mediaRecorder) return;
+                
+                console.log('Stopping auto-recording...');
+                
+                try {
+                    if (this.mediaRecorder.state === 'recording') {
+                        this.mediaRecorder.stop();
+                    }
+                    
+                    this.isRecording = false;
+                    this.updateVADStatus('listening', 'Listening for voice...');
+                    this.showNotification('Recording sent for processing', 'success');
+                    
+                } catch (error) {
+                    console.error('Failed to stop recording:', error);
+                }
+            }
+
+            updateVADStatus(status, message) {
+                const vadBtn = document.getElementById('vadBtn');
+                const vadText = document.getElementById('vadText');
+                const vadStatusDot = document.getElementById('vadStatusDot');
+                const vadStatusText = document.getElementById('vadStatusText');
+                
+                if (vadBtn && vadText) {
+                    vadBtn.className = 'btn';
+                    
+                    switch (status) {
+                        case 'listening':
+                            vadBtn.classList.add('vad-listening');
+                            vadText.textContent = 'Voice Detection Active';
+                            break;
+                        case 'recording':
+                            vadBtn.classList.add('vad-recording');
+                            vadText.textContent = 'Recording Voice...';
+                            break;
+                        case 'disabled':
+                            vadText.textContent = 'Voice Detection Disabled';
+                            break;
+                    }
+                }
+                
+                if (vadStatusDot && vadStatusText) {
+                    vadStatusDot.className = 'vad-status-dot';
+                    vadStatusText.textContent = message;
+                    
+                    switch (status) {
+                        case 'listening':
+                            vadStatusDot.classList.add('listening');
+                            break;
+                        case 'recording':
+                            vadStatusDot.classList.add('recording');
+                            break;
+                    }
+                }
+            }
+
+            toggleVAD() {
+                this.isVadEnabled = !this.isVadEnabled;
+                
+                if (this.isVadEnabled && this.audioStream) {
+                    this.updateVADStatus('listening', 'Listening for voice...');
+                    this.showNotification('Voice activation enabled', 'success');
+                    
+                    // Reset counters
+                    this.consecutiveSilenceFrames = 0;
+                    this.consecutiveVoiceFrames = 0;
+                    
+                } else {
+                    this.updateVADStatus('disabled', 'Voice detection disabled');
+                    this.showNotification('Voice activation disabled', 'info');
+                    
+                    // Clear timeouts and stop recording
+                    if (this.vadTimeoutId) clearTimeout(this.vadTimeoutId);
+                    if (this.vadStartTimeoutId) clearTimeout(this.vadStartTimeoutId);
+                    
+                    if (this.isRecording) {
+                        this.stopAutoRecording();
+                    }
+                }
+            }
+
+            adjustVadSensitivity(newThreshold) {
+                this.vadThreshold = Math.max(10, Math.min(80, newThreshold));
+                
+                // Update visual threshold indicator
+                const vadThreshold = document.getElementById('vadThreshold');
+                if (vadThreshold) {
+                    vadThreshold.style.left = `${this.vadThreshold}%`;
+                }
+                
+                this.showNotification(`Voice sensitivity: ${this.vadThreshold}%`, 'info');
+                console.log('VAD sensitivity adjusted to:', this.vadThreshold);
+            }
+
+            sendMessage(message) {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify(message));
+                    return true;
+                } else {
+                    console.warn('WebSocket not connected, message not sent:', message);
+                    return false;
+                }
+            }
+
+            sendCodeUpdate() {
+                const codeEditor = document.getElementById('codeEditor');
+                const message = {
+                    type: 'code_update',
+                    code: codeEditor.value,
+                    cursor_position: codeEditor.selectionStart,
+                    timestamp: new Date().toISOString()
+                };
+                
+                if (this.sendMessage(message)) {
+                    const feedbackContent = document.getElementById('feedbackContent');
+                    if (!document.querySelector('.analyzing-indicator')) {
+                        const indicator = document.createElement('div');
+                        indicator.className = 'analysis-item analyzing-indicator';
+                        indicator.innerHTML = `
+                            <h4><i class="fas fa-spinner fa-spin"></i> Analyzing Code...</h4>
+                            <p>CodeSage is reviewing your implementation...</p>
+                        `;
+                        feedbackContent.appendChild(indicator);
+                    }
+                }
+            }
+
+            executeCode() {
+                const codeEditor = document.getElementById('codeEditor');
+                const runBtn = document.getElementById('runBtn');
+                
+                if (!codeEditor.value.trim()) {
+                    this.showNotification('Please write some code first!', 'info');
+                    return;
+                }
+
+                const message = {
+                    type: 'code_execute',
+                    code: codeEditor.value,
+                    language: 'python',
+                    timestamp: new Date().toISOString()
+                };
+                
+                if (this.sendMessage(message)) {
+                    runBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Executing...';
+                    runBtn.disabled = true;
+                    runBtn.classList.add('loading');
+                    
+                    const outputSection = document.getElementById('outputSection');
+                    outputSection.innerHTML = `
+                        <div style="margin-top: 1.5rem; color: var(--text-muted);">
+                            <i class="fas fa-cog fa-spin"></i> Running your code...
+                        </div>
+                    `;
+                }
+            }
+
+            sendAudioChunk(audioBlob) {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const base64Audio = reader.result.split(',')[1];
+                    
+                    const message = {
+                        type: 'audio_chunk',
+                        audio_data: base64Audio,
+                        format: 'webm',
+                        duration: 2.0, // Approximate duration
+                        timestamp: new Date().toISOString()
+                    };
+                    
+                    if (this.sendMessage(message)) {
+                        console.log('Audio chunk sent successfully, size:', audioBlob.size);
+                    } else {
+                        console.error('Failed to send audio chunk');
+                    }
+                };
+                reader.readAsDataURL(audioBlob);
+            }
+
+            handleMessage(message) {
+                console.log('Received message:', message);
+                
+                const analyzingIndicator = document.querySelector('.analyzing-indicator');
+                if (analyzingIndicator) {
+                    analyzingIndicator.remove();
+                }
+                
+                switch (message.type) {
+                    case 'code_analysis':
+                        this.displayAnalysis(message.analysis, message.suggestions);
+                        break;
+                    case 'execution_result':
+                        this.displayExecutionResult(message.result);
+                        break;
+                    case 'audio_processed':
+                        console.log('Audio processed by server');
+                        break;
+                    case 'pong':
+                        console.log('Connection heartbeat received');
+                        break;
+                    default:
+                        console.log('Unknown message type:', message.type);
+                }
+            }
+
+            displayAnalysis(analysis, suggestions) {
+                const feedbackContent = document.getElementById('feedbackContent');
+                
+                const timestamp = new Date().toLocaleTimeString();
+                
+                const analysisHtml = `
+                    <div class="analysis-item" style="animation: slideIn 0.3s ease;">
+                        <h4>
+                            <i class="fas fa-search"></i>
+                            Code Analysis (${timestamp})
+                        </h4>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 1rem 0;">
+                            <div>
+                                <strong>Syntax:</strong> 
+                                ${analysis.syntax_valid ? 
+                                    '<span class="success-indicator"><i class="fas fa-check-circle"></i> Valid</span>' : 
+                                    '<span class="error-indicator"><i class="fas fa-times-circle"></i> Invalid</span>'}
+                            </div>
+                            <div>
+                                <strong>Complexity:</strong> 
+                                <span style="color: var(--warning-orange);">${analysis.complexity}</span>
+                            </div>
+                        </div>
+                        ${analysis.style_issues.length > 0 ? 
+                            '<div class="error"><i class="fas fa-exclamation-triangle"></i> <strong>Style Issues:</strong><br>' + 
+                            analysis.style_issues.map(issue => `• ${issue}`).join('<br>') + '</div>' : ''}
+                        ${analysis.potential_errors.length > 0 ? 
+                            '<div class="error"><i class="fas fa-bug"></i> <strong>Potential Errors:</strong><br>' + 
+                            analysis.potential_errors.map(error => `• ${error}`).join('<br>') + '</div>' : ''}
+                    </div>
+                `;
+                
+                const suggestionsHtml = suggestions.length > 0 ? `
+                    <div class="analysis-item" style="animation: slideIn 0.5s ease;">
+                        <h4>
+                            <i class="fas fa-lightbulb"></i>
+                            AI Suggestions
+                        </h4>
+                        ${suggestions.map(s => `
+                            <div class="suggestion">
+                                <i class="fas fa-arrow-right" style="color: var(--success-green); margin-right: 0.5rem;"></i>
+                                ${s}
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : '';
+                
+                feedbackContent.innerHTML = analysisHtml + suggestionsHtml;
+                feedbackContent.scrollTop = feedbackContent.scrollHeight;
+            }
+
+            displayExecutionResult(result) {
+                const outputSection = document.getElementById('outputSection');
+                const runBtn = document.getElementById('runBtn');
+                
+                let output = '';
+                let statusIcon = '';
+                let statusColor = '';
+                
+                if (result.success) {
+                    output = result.output || 'Code executed successfully (no output)';
+                    statusIcon = '<i class="fas fa-check-circle success-indicator"></i>';
+                    statusColor = 'var(--success-green)';
+                    this.showNotification('Code executed successfully!', 'success');
+                } else {
+                    output = result.error || 'Unknown execution error';
+                    statusIcon = '<i class="fas fa-times-circle error-indicator"></i>';
+                    statusColor = 'var(--error-red)';
+                    this.showNotification('Code execution failed', 'error');
+                }
+                
+                const executionInfo = `
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; padding: 0.5rem; background: var(--tertiary-bg); border-radius: 6px;">
+                        ${statusIcon}
+                        <strong style="color: ${statusColor};">
+                            ${result.success ? 'Execution Successful' : 'Execution Failed'}
+                        </strong>
+                        <span style="margin-left: auto; font-size: 0.8rem; color: var(--text-muted);">
+                            ${result.execution_time} | ${result.memory_usage}
+                        </span>
+                    </div>
+                `;
+                
+                outputSection.innerHTML = executionInfo + `<pre style="margin: 0;">${output}</pre>`;
+                
+                runBtn.innerHTML = '<i class="fas fa-play"></i> Run Code';
+                runBtn.disabled = false;
+                runBtn.classList.remove('loading');
+            }
+
+            showNotification(message, type = 'info') {
+                const container = document.getElementById('notificationContainer') || this.createNotificationContainer();
+                
+                const notification = document.createElement('div');
+                notification.className = `notification ${type}`;
+                
+                const icons = {
+                    success: 'fas fa-check-circle',
+                    error: 'fas fa-exclamation-circle',
+                    info: 'fas fa-info-circle',
+                    warning: 'fas fa-exclamation-triangle'
+                };
+                
+                notification.innerHTML = `
+                    <div style="display: flex; align-items: center; gap: 0.8rem;">
+                        <i class="${icons[type] || icons.info}" style="font-size: 1.2rem;"></i>
+                        <div>
+                            <div style="font-weight: 600; margin-bottom: 0.2rem;">${type.charAt(0).toUpperCase() + type.slice(1)}</div>
+                            <div style="color: var(--text-secondary); font-size: 0.9rem;">${message}</div>
+                        </div>
+                    </div>
+                `;
+                
+                container.appendChild(notification);
+                
+                setTimeout(() => notification.classList.add('show'), 100);
+                
+                setTimeout(() => {
+                    notification.classList.remove('show');
+                    setTimeout(() => notification.remove(), 300);
+                }, 4000);
+            }
+
+            createNotificationContainer() {
+                const container = document.createElement('div');
+                container.id = 'notificationContainer';
+                document.body.appendChild(container);
+                return container;
+            }
+        }
+
+        // Global functions
+        let codeSageClient;
+
+        function executeCode() {
+            if (codeSageClient) {
+                codeSageClient.executeCode();
+            }
+        }
+
+        function toggleVAD() {
+            if (codeSageClient) {
+                codeSageClient.toggleVAD();
+            }
+        }
+
+        function adjustVadSensitivity(value) {
+            if (codeSageClient) {
+                codeSageClient.adjustVadSensitivity(value);
+                
+                const sensitivityValue = document.getElementById('sensitivityValue');
+                if (sensitivityValue) {
+                    sensitivityValue.textContent = `${value}%`;
+                }
+            }
+        }
+
+        // CSS animations
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes slideIn {
+                from {
+                    opacity: 0;
+                    transform: translateY(20px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+            
+            @keyframes rainbow {
+                0% { filter: hue-rotate(0deg); }
+                25% { filter: hue-rotate(90deg); }
+                50% { filter: hue-rotate(180deg); }
+                75% { filter: hue-rotate(270deg); }
+                100% { filter: hue-rotate(360deg); }
+            }
+        `;
+        document.head.appendChild(style);
+
+        // Initialize when DOM loads
+        document.addEventListener('DOMContentLoaded', () => {
+            codeSageClient = new CodeSageClient();
+            
+            // Enhanced button interactions
+            document.querySelectorAll('.btn').forEach(btn => {
+                btn.addEventListener('mouseenter', () => {
+                    if (!btn.disabled) {
+                        btn.style.transform = 'translateY(-2px) scale(1.02)';
+                    }
+                });
+                
+                btn.addEventListener('mouseleave', () => {
+                    if (!btn.disabled) {
+                        btn.style.transform = 'translateY(0) scale(1)';
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>

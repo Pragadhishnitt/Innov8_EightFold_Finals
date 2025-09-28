@@ -1,0 +1,13 @@
+Session ID: session_1759019657474_12ea6n7k5
+Chunk ID: 4
+Timestamp: 2025-09-28T06:04:50.275248
+Duration: 2.0 seconds
+Confidence: 0.85
+Language: en
+Service: mock-transcription
+
+==================================================
+TRANSCRIPT
+==================================================
+
+I am working on solving the algorithm problem step by step. This is a longer audio recording with more detailed content.

@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome to CodeSage</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-bg: #0d1117;
+            --secondary-bg: #161b22;
+            --tertiary-bg: #21262d;
+            --accent-bg: #30363d;
+            --primary-blue: #58a6ff;
+            --secondary-blue: #1f6feb;
+            --success-green: #238636;
+            --warning-orange: #d29922;
+            --error-red: #f85149;
+            --text-primary: #f0f6fc;
+            --text-secondary: #8b949e;
+            --text-muted: #6e7681;
+            --border-color: #30363d;
+            --glow-blue: rgba(88, 166, 255, 0.3);
+            --glow-green: rgba(35, 134, 54, 0.3);
+            --glow-red: rgba(248, 81, 73, 0.3);
+            --glow-orange: rgba(255, 140, 66, 0.3);
+        }
+        
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif; 
+            background-color: var(--primary-bg); 
+            color: var(--text-primary); 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            min-height: 100vh; 
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        
+        .container { 
+            background-color: var(--secondary-bg); 
+            border: 1px solid var(--border-color); 
+            border-radius: 12px; 
+            padding: 3rem; 
+            max-width: 800px; 
+            width: 90%; 
+            text-align: center; 
+        }
+        
+        h1 { 
+            margin-bottom: 2rem; 
+            color: var(--primary-blue);
+        }
+        
+        .form-grid { 
+            display: grid; 
+            grid-template-columns: 1fr 1fr; 
+            gap: 2.5rem; 
+            text-align: left; 
+            align-items: start; 
+        }
+        
+        @media (max-width: 768px) {
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .form-group { 
+            display: flex; 
+            flex-direction: column; 
+            gap: 1.5rem; 
+        }
+        
+        label { 
+            margin-bottom: 0.5rem; 
+            color: var(--text-secondary); 
+            font-weight: 600; 
+        }
+        
+        input, select { 
+            background-color: var(--primary-bg); 
+            border: 1px solid var(--border-color); 
+            border-radius: 6px; 
+            padding: 0.8rem; 
+            color: var(--text-primary); 
+            font-size: 1rem; 
+            width: 100%; 
+            box-sizing: border-box; 
+            transition: border-color 0.2s;
+        }
+        
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--primary-blue);
+        }
+
+        /* Custom dropdown styles */
+        .skills-dropdown {
+            position: relative;
+            margin-bottom: 0.5rem;
+        }
+
+        .dropdown-header {
+            background-color: var(--primary-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 0.8rem;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: border-color 0.2s;
+            min-height: 20px;
+        }
+
+        .dropdown-header:hover,
+        .dropdown-header.active {
+            border-color: var(--primary-blue);
+        }
+
+        .dropdown-placeholder {
+            color: var(--text-muted);
+        }
+
+        .dropdown-selected {
+            color: var(--text-primary);
+        }
+
+        .dropdown-arrow {
+            transition: transform 0.2s;
+        }
+
+        .dropdown-arrow.rotated {
+            transform: rotate(180deg);
+        }
+
+        .dropdown-options {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background-color: var(--primary-bg);
+            border: 1px solid var(--border-color);
+            border-top: none;
+            border-radius: 0 0 6px 6px;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
+        }
+
+        .dropdown-options.show {
+            display: block;
+        }
+
+        .dropdown-option {
+            padding: 0.8rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: background-color 0.2s;
+        }
+
+        .dropdown-option:hover {
+            background-color: var(--accent-bg);
+        }
+
+        .dropdown-option input[type="checkbox"] {
+            width: auto;
+            margin: 0;
+            accent-color: var(--primary-blue);
+        }
+
+        .dropdown-option.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .selected-skills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+            min-height: 24px;
+        }
+
+        .skill-tag {
+            background-color: var(--primary-blue);
+            color: white;
+            padding: 0.3rem 0.6rem;
+            border-radius: 15px;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+        }
+
+        .skill-tag .remove {
+            cursor: pointer;
+            font-weight: bold;
+            opacity: 0.8;
+        }
+
+        .skill-tag .remove:hover {
+            opacity: 1;
+        }
+
+        .skills-limit {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            margin-top: 0.3rem;
+        }
+        
+        .camera-section { 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            gap: 1rem; 
+        }
+        
+        video { 
+            border-radius: 8px; 
+            border: 2px solid var(--border-color); 
+            width: 100%; 
+            max-width: 300px;
+            display: block; 
+        }
+        
+        #photoCanvas {
+            border-radius: 8px; 
+            border: 2px solid var(--success-green);
+            width: 100%; 
+            max-width: 300px;
+            display: none;
+        }
+        
+        .btn { 
+            background: var(--primary-blue); 
+            color: white; 
+            border: none; 
+            padding: 0.8rem 1.5rem; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            font-size: 1rem; 
+            font-weight: 600; 
+            display: inline-flex; 
+            align-items: center; 
+            gap: 0.5rem; 
+            transition: background-color 0.2s; 
+        }
+        
+        .btn:hover:not(:disabled) { 
+            background: var(--secondary-blue); 
+        }
+        
+        .btn:disabled { 
+            background: #6e7681; 
+            cursor: not-allowed; 
+        }
+        
+        .btn.success {
+            background: var(--success-green);
+        }
+        
+        .error-message {
+            color: var(--error-red);
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+            text-align: center;
+        }
+        
+        .status-message {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-top: 1rem;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1><i class="fas fa-brain"></i> Welcome to CodeSage</h1>
+        <p style="color: #8b949e; margin-bottom: 2.5rem;">Please provide a few details to start your interview.</p>
+        
+        <div class="form-grid">
+            <div class="form-group">
+                <div>
+                    <label for="name">Full Name</label>
+                    <input type="text" id="name" placeholder="e.g., Ada Lovelace" required>
+                </div>
+                
+                <div>
+                    <label for="skills">Select Your Strong DSA Topics (Max 2)</label>
+                    <div class="skills-dropdown" id="skillsDropdown">
+                        <div class="dropdown-header" id="dropdownHeader">
+                            <span class="dropdown-placeholder" id="dropdownText">Select your topics...</span>
+                            <i class="fas fa-chevron-down dropdown-arrow" id="dropdownArrow"></i>
+                        </div>
+                        <div class="dropdown-options" id="dropdownOptions">
+                            <!-- Options will be populated by JavaScript -->
+                        </div>
+                    </div>
+                    <div class="selected-skills" id="selectedSkills"></div>
+                    <div class="skills-limit">Select up to 2 topics where you feel most confident</div>
+                </div>
+                
+                <div>
+                    <label for="level">Experience Level</label>
+                    <select id="level">
+                        <option value="beginner">Beginner</option>
+                        <option value="intermediate" selected>Intermediate</option>
+                        <option value="advanced">Advanced</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="camera-section">
+                <video id="cameraFeed" autoplay muted playsinline style="display: block;"></video>
+                <canvas id="photoCanvas"></canvas>
+                <button id="captureBtn" class="btn"><i class="fas fa-camera"></i> Take Photo</button>
+                <div id="cameraStatus" class="status-message">Loading camera...</div>
+            </div>
+        </div>
+        
+        <button id="startBtn" class="btn" style="margin-top: 2.5rem;" disabled>
+            <i class="fas fa-rocket"></i> Start Interview
+        </button>
+        
+        <div id="errorMessage" class="error-message" style="display: none;"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        // DSA Topics
+        const dsaTopics = [
+            'Arrays & Strings',
+            'Linked Lists',
+            'Stacks & Queues',
+            'Trees & Binary Trees',
+            'Binary Search Trees',
+            'Heaps & Priority Queues',
+            'Hash Tables & Maps',
+            'Graphs & Graph Algorithms',
+            'Dynamic Programming',
+            'Greedy Algorithms',
+            'Backtracking',
+            'Sorting Algorithms',
+            'Searching Algorithms',
+            'Recursion',
+            'Two Pointers',
+            'Sliding Window',
+            'Divide & Conquer',
+            'Bit Manipulation',
+            'Mathematical Algorithms',
+            'Trie Data Structure'
+        ];
+
+        // DOM elements
+        const video = document.getElementById('cameraFeed');
+        const canvas = document.getElementById('photoCanvas');
+        const captureBtn = document.getElementById('captureBtn');
+        const startBtn = document.getElementById('startBtn');
+        const nameInput = document.getElementById('name');
+        const levelSelect = document.getElementById('level');
+        const cameraStatus = document.getElementById('cameraStatus');
+        const errorMessage = document.getElementById('errorMessage');
+
+        // Dropdown elements
+        const skillsDropdown = document.getElementById('skillsDropdown');
+        const dropdownHeader = document.getElementById('dropdownHeader');
+        const dropdownText = document.getElementById('dropdownText');
+        const dropdownArrow = document.getElementById('dropdownArrow');
+        const dropdownOptions = document.getElementById('dropdownOptions');
+        const selectedSkillsContainer = document.getElementById('selectedSkills');
+
+        // Configuration
+        const SUPABASE_URL = "https://khvefqgkztbqhmctqnpi.supabase.co";
+        const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtodmVmcWdrenRicWhtY3RxbnBpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg5NzU0MDUsImV4cCI6MjA3NDU1MTQwNX0.AnKnw2kUL9AiaoZXvUw-Viiw-1E4gl5foEl2QVLvnec";
+        
+        let supabase = null;
+        let photoBlob = null;
+        let stream = null;
+        let selectedSkills = [];
+        const maxSkills = 2;
+
+        // Initialize Supabase
+        try {
+            supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        } catch (error) {
+            showError('Failed to initialize Supabase client');
+            console.error('Supabase initialization error:', error);
+        }
+
+        // Initialize dropdown
+        function initializeDropdown() {
+            dropdownOptions.innerHTML = '';
+            
+            dsaTopics.forEach(topic => {
+                const option = document.createElement('div');
+                option.className = 'dropdown-option';
+                option.innerHTML = `
+                    <input type="checkbox" id="skill-${topic}" value="${topic}">
+                    <label for="skill-${topic}">${topic}</label>
+                `;
+                
+                const checkbox = option.querySelector('input[type="checkbox"]');
+                checkbox.addEventListener('change', (e) => handleSkillSelection(e, topic));
+                
+                dropdownOptions.appendChild(option);
+            });
+        }
+
+        // Handle skill selection
+        function handleSkillSelection(event, topic) {
+            const isChecked = event.target.checked;
+            
+            if (isChecked) {
+                if (selectedSkills.length < maxSkills) {
+                    selectedSkills.push(topic);
+                } else {
+                    event.target.checked = false;
+                    showError(`You can select maximum ${maxSkills} topics.`);
+                    setTimeout(() => hideError(), 3000);
+                    return;
+                }
+            } else {
+                selectedSkills = selectedSkills.filter(skill => skill !== topic);
+            }
+            
+            updateSelectedSkillsDisplay();
+            updateDropdownState();
+            checkFormValidity();
+        }
+
+        // Update selected skills display
+        function updateSelectedSkillsDisplay() {
+            selectedSkillsContainer.innerHTML = '';
+            
+            selectedSkills.forEach(skill => {
+                const tag = document.createElement('div');
+                tag.className = 'skill-tag';
+                tag.innerHTML = `
+                    ${skill}
+                    <span class="remove" onclick="removeSkill('${skill}')">&times;</span>
+                `;
+                selectedSkillsContainer.appendChild(tag);
+            });
+
+            // Update dropdown header text
+            if (selectedSkills.length === 0) {
+                dropdownText.textContent = 'Select your topics...';
+                dropdownText.className = 'dropdown-placeholder';
+            } else {
+                dropdownText.textContent = `${selectedSkills.length} topic${selectedSkills.length > 1 ? 's' : ''} selected`;
+                dropdownText.className = 'dropdown-selected';
+            }
+        }
+
+        // Remove skill
+        function removeSkill(skillToRemove) {
+            selectedSkills = selectedSkills.filter(skill => skill !== skillToRemove);
+            
+            // Uncheck the corresponding checkbox
+            const checkbox = document.getElementById(`skill-${skillToRemove}`);
+            if (checkbox) checkbox.checked = false;
+            
+            updateSelectedSkillsDisplay();
+            updateDropdownState();
+            checkFormValidity();
+        }
+
+        // Update dropdown state
+        function updateDropdownState() {
+            const options = dropdownOptions.querySelectorAll('.dropdown-option');
+            options.forEach(option => {
+                const checkbox = option.querySelector('input[type="checkbox"]');
+                if (!checkbox.checked && selectedSkills.length >= maxSkills) {
+                    option.classList.add('disabled');
+                    checkbox.disabled = true;
+                } else {
+                    option.classList.remove('disabled');
+                    checkbox.disabled = false;
+                }
+            });
+        }
+
+        // Dropdown toggle
+        dropdownHeader.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isOpen = dropdownOptions.classList.contains('show');
+            
+            if (isOpen) {
+                closeDropdown();
+            } else {
+                openDropdown();
+            }
+        });
+
+        function openDropdown() {
+            dropdownOptions.classList.add('show');
+            dropdownArrow.classList.add('rotated');
+            dropdownHeader.classList.add('active');
+        }
+
+        function closeDropdown() {
+            dropdownOptions.classList.remove('show');
+            dropdownArrow.classList.remove('rotated');
+            dropdownHeader.classList.remove('active');
+        }
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!skillsDropdown.contains(e.target)) {
+                closeDropdown();
+            }
+        });
+
+        // Helper functions
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+        }
+
+        function hideError() {
+            errorMessage.style.display = 'none';
+        }
+
+        function updateCameraStatus(message, isError = false) {
+            cameraStatus.textContent = message;
+            cameraStatus.style.color = isError ? 'var(--error-red)' : 'var(--text-secondary)';
+        }
+
+        function checkFormValidity() {
+            const hasName = nameInput.value.trim() !== '';
+            const hasSkills = selectedSkills.length > 0;
+            const hasPhoto = photoBlob !== null;
+            
+            startBtn.disabled = !(hasName && hasSkills && hasPhoto);
+        }
+
+        // Camera initialization
+        async function initializeCamera() {
+            try {
+                updateCameraStatus('Requesting camera access...');
+                
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        width: { ideal: 640 }, 
+                        height: { ideal: 480 },
+                        facingMode: 'user'
+                    } 
+                });
+                
+                video.srcObject = stream;
+                updateCameraStatus('Camera ready');
+                
+                video.addEventListener('loadedmetadata', () => {
+                    captureBtn.disabled = false;
+                });
+                
+            } catch (error) {
+                console.error("Camera access error:", error);
+                let errorMsg = 'Camera access denied. ';
+                
+                if (error.name === 'NotAllowedError') {
+                    errorMsg += 'Please allow camera permissions and refresh the page.';
+                } else if (error.name === 'NotFoundError') {
+                    errorMsg += 'No camera found on this device.';
+                } else if (error.name === 'NotSupportedError') {
+                    errorMsg += 'Camera not supported on this browser.';
+                } else {
+                    errorMsg += 'Please check your camera and try again.';
+                }
+                
+                updateCameraStatus(errorMsg, true);
+                captureBtn.disabled = true;
+            }
+        }
+
+        // Photo capture
+        captureBtn.addEventListener('click', () => {
+            if (!stream || video.videoWidth === 0) {
+                showError('Camera not ready. Please wait or refresh the page.');
+                return;
+            }
+
+            try {
+                // Set canvas dimensions to match video
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                
+                const context = canvas.getContext('2d');
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                // Show captured photo
+                video.style.display = 'none';
+                canvas.style.display = 'block';
+                
+                // Update button state
+                captureBtn.innerHTML = '<i class="fas fa-check"></i> Photo Captured!';
+                captureBtn.classList.add('success');
+                
+                // Convert to blob
+                canvas.toBlob(blob => {
+                    if (blob) {
+                        photoBlob = blob;
+                        updateCameraStatus('Photo captured successfully');
+                        checkFormValidity();
+                        
+                        // Add retake option
+                        setTimeout(() => {
+                            const retakeBtn = document.createElement('button');
+                            retakeBtn.className = 'btn';
+                            retakeBtn.style.marginLeft = '10px';
+                            retakeBtn.innerHTML = '<i class="fas fa-redo"></i> Retake';
+                            retakeBtn.onclick = retakePhoto;
+                            captureBtn.parentNode.insertBefore(retakeBtn, captureBtn.nextSibling);
+                        }, 100);
+                        
+                    } else {
+                        showError('Failed to capture photo. Please try again.');
+                    }
+                }, 'image/jpeg', 0.8);
+                
+            } catch (error) {
+                console.error('Photo capture error:', error);
+                showError('Failed to capture photo. Please try again.');
+            }
+        });
+
+        function retakePhoto() {
+            // Reset UI
+            video.style.display = 'block';
+            canvas.style.display = 'none';
+            captureBtn.innerHTML = '<i class="fas fa-camera"></i> Take Photo';
+            captureBtn.classList.remove('success');
+            
+            // Remove retake button
+            const retakeBtn = captureBtn.parentNode.querySelector('button[onclick="retakePhoto()"]');
+            if (retakeBtn) {
+                retakeBtn.remove();
+            }
+            
+            // Reset photo data
+            photoBlob = null;
+            updateCameraStatus('Camera ready');
+            checkFormValidity();
+        }
+
+        // Form validation
+        nameInput.addEventListener('input', checkFormValidity);
+
+        // Start interview process
+        startBtn.addEventListener('click', async () => {
+            const name = nameInput.value.trim();
+            const skills = selectedSkills.join(', ');
+            const level = levelSelect.value;
+
+            if (!name || selectedSkills.length === 0 || !photoBlob) {
+                showError("Please fill in all required fields and take a photo.");
+                return;
+            }
+
+            hideError();
+            startBtn.disabled = true;
+            startBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparing your session...';
+
+            try {
+                // Generate unique session ID
+                const sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                const photoFileName = `${sessionId}.jpg`;
+
+                // Upload photo to Supabase storage
+                const { data: photoData, error: photoError } = await supabase
+                    .storage
+                    .from('avatars')
+                    .upload(photoFileName, photoBlob, {
+                        contentType: 'image/jpeg',
+                        upsert: false
+                    });
+
+                if (photoError) {
+                    console.error('Photo upload error:', photoError);
+                    throw new Error(`Photo upload failed: ${photoError.message}`);
+                }
+                
+                // Get public URL for the uploaded photo
+                const { data: { publicUrl } } = supabase
+                    .storage
+                    .from('avatars')
+                    .getPublicUrl(photoFileName);
+
+                // First, create the session record (or update if exists)
+                const { error: sessionError } = await supabase
+                    .from('sessions')
+                    .upsert({
+                        session_id: sessionId,
+                        is_active: true,
+                        created_at: new Date().toISOString(),
+                        last_activity: new Date().toISOString()
+                    }, {
+                        onConflict: 'session_id'
+                    });
+
+                if (sessionError) {
+                    console.error('Session creation error:', sessionError);
+                    throw new Error(`Session creation failed: ${sessionError.message}`);
+                }
+
+                // Then, store candidate information
+                const { error: insertError } = await supabase
+                    .from('candidates')
+                    .insert({
+                        session_id: sessionId,
+                        name: name,
+                        skills: skills,
+                        level: level,
+                        photo_url: publicUrl,
+                        created_at: new Date().toISOString()
+                    });
+                
+                if (insertError) {
+                    console.error('Database insert error:', insertError);
+                    throw new Error(`Database error: ${insertError.message}`);
+                }
+
+                // Redirect to interview interface
+                const interviewUrl = `/interview?session_id=${sessionId}`;
+                window.location.href = interviewUrl;
+
+            } catch (error) {
+                console.error('Session creation error:', error);
+                
+                let errorMsg = 'Failed to start the interview session. ';
+                if (error.message.includes('RLS')) {
+                    errorMsg += 'Database permissions issue. Please check your Supabase RLS policies.';
+                } else if (error.message.includes('storage')) {
+                    errorMsg += 'Photo upload failed. Please check your Supabase storage configuration.';
+                } else {
+                    errorMsg += error.message || 'Please try again.';
+                }
+                
+                showError(errorMsg);
+                
+                // Reset button
+                startBtn.disabled = false;
+                startBtn.innerHTML = '<i class="fas fa-rocket"></i> Start Interview';
+            }
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+        });
+
+        // Initialize everything when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            initializeDropdown();
+            initializeCamera();
+        });
+
+        // Handle URL parameters for testing
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('test') === 'true') {
+            console.log('Test mode enabled');
+            // You can add test-specific behavior here
+        }
+    </script>
+</body>
+</html>

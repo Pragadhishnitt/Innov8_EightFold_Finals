@@ -1,0 +1,220 @@
+{
+  "timestamp": "2025-09-28T06:04:04.141078",
+  "snapshot_id": "snapshot_1759019644",
+  "data": {
+    "sessions": [
+      {
+        "id": 10,
+        "session_id": "session_1759019264922_3wgtebhfo",
+        "is_active": false,
+        "created_at": "2025-09-28T00:27:46.446+00:00",
+        "last_activity": "2025-09-28T05:58:29.282191+00:00",
+        "disconnected_at": null
+      },
+      {
+        "id": 1,
+        "session_id": "session_1759015641429_afpw6r8zw",
+        "is_active": false,
+        "created_at": "2025-09-28T05:08:19.811742+00:00",
+        "last_activity": "2025-09-28T05:10:16.366529+00:00",
+        "disconnected_at": null
+      },
+      {
+        "id": 2,
+        "session_id": "session_1759016357976_0jdrqz4ek",
+        "is_active": false,
+        "created_at": "2025-09-27T23:39:18.922+00:00",
+        "last_activity": "2025-09-28T05:10:16.428642+00:00",
+        "disconnected_at": null
+      },
+      {
+        "id": 3,
+        "session_id": "session_1759016875167_xtvi3tljb",
+        "is_active": false,
+        "created_at": "2025-09-27T23:47:56.395+00:00",
+        "last_activity": "2025-09-28T05:20:15.331837+00:00",
+        "disconnected_at": null
+      },
+      {
+        "id": 4,
+        "session_id": "test-session-1759017597698",
+        "is_active": false,
+        "created_at": "2025-09-28T05:30:19.356738+00:00",
+        "last_activity": "2025-09-28T05:30:19.51659+00:00",
+        "disconnected_at": null
+      },
+      {
+        "id": 5,
+        "session_id": "session_1759017657654_1t3q71w39",
+        "is_active": false,
+        "created_at": "2025-09-28T00:00:59.191+00:00",
+        "last_activity": "2025-09-28T05:31:11.243224+00:00",
+        "disconnected_at": null
+      },
+      {
+        "id": 11,
+        "session_id": "session_1759019376630_8ab8wty8p",
+        "is_active": false,
+        "created_at": "2025-09-28T00:29:37.138+00:00",
+        "last_activity": "2025-09-28T06:01:28.980054+00:00",
+        "disconnected_at": null
+      },
+      {
+        "id": 6,
+        "session_id": "test-session-1759017741340",
+        "is_active": false,
+        "created_at": "2025-09-28T05:33:09.595636+00:00",
+        "last_activity": "2025-09-28T05:33:21.278968+00:00",
+        "disconnected_at": null
+      },
+      {
+        "id": 7,
+        "session_id": "test-session-1759017801154",
+        "is_active": false,
+        "created_at": "2025-09-28T05:33:24.595809+00:00",
+        "last_activity": "2025-09-28T05:34:23.087502+00:00",
+        "disconnected_at": null
+      },
+      {
+        "id": 8,
+        "session_id": "session_1759017832105_3lyqrjp4a",
+        "is_active": true,
+        "created_at": "2025-09-28T00:03:53.685+00:00",
+        "last_activity": "2025-09-28T05:34:45.647678+00:00",
+        "disconnected_at": null
+      },
+      {
+        "id": 9,
+        "session_id": "session_1759018948268_b8rzmv0g5",
+        "is_active": false,
+        "created_at": "2025-09-28T00:22:28.722+00:00",
+        "last_activity": "2025-09-28T05:53:23.377779+00:00",
+        "disconnected_at": null
+      }
+    ],
+    "audio_chunks": [
+      {
+        "id": 1,
+        "session_id": "session_1759019376630_8ab8wty8p",
+        "format": "webm",
+        "duration": 2.0,
+        "size_kb": 208.73,
+        "processing_status": "completed",
+        "transcript": "I am working on solving the algorithm problem step by step. This is a longer audio recording with more detailed content.",
+        "transcript_confidence": 0.85,
+        "transcript_language": "en",
+        "transcript_service": "mock-transcription",
+        "created_at": "2025-09-28T05:59:53.191971+00:00",
+        "processing_started_at": "2025-09-28T05:59:54.468433+00:00",
+        "processing_completed_at": "2025-09-28T06:00:06.821305+00:00"
+      },
+      {
+        "id": 2,
+        "session_id": "session_1759019376630_8ab8wty8p",
+        "format": "webm",
+        "duration": 2.0,
+        "size_kb": 371.27,
+        "processing_status": "completed",
+        "transcript": "The time complexity of this solution should be optimized. This is a longer audio recording with more detailed content.",
+        "transcript_confidence": 0.85,
+        "transcript_language": "en",
+        "transcript_service": "mock-transcription",
+        "created_at": "2025-09-28T06:01:00.778591+00:00",
+        "processing_started_at": "2025-09-28T06:01:03.512245+00:00",
+        "processing_completed_at": "2025-09-28T06:01:20.153416+00:00"
+      },
+      {
+        "id": 3,
+        "session_id": "session_1759019376630_8ab8wty8p",
+        "format": "webm",
+        "duration": 2.0,
+        "size_kb": 102.62,
+        "processing_status": "completed",
+        "transcript": "I am working on solving the algorithm problem step by step.",
+        "transcript_confidence": 0.85,
+        "transcript_language": "en",
+        "transcript_service": "mock-transcription",
+        "created_at": "2025-09-28T06:01:10.398124+00:00",
+        "processing_started_at": "2025-09-28T06:01:11.088603+00:00",
+        "processing_completed_at": "2025-09-28T06:01:23.02939+00:00"
+      }
+    ],
+    "code_history": [
+      {
+        "id": 1,
+        "session_id": "session_1759019376630_8ab8wty8p",
+        "code": "def pypi",
+        "cursor_position": 8,
+        "line_count": 1,
+        "char_count": 8,
+        "code_hash": "61ad5dfe791d259c5dda1c0c04e14751",
+        "created_at": "2025-09-28T06:00:24.138476+00:00"
+      },
+      {
+        "id": 2,
+        "session_id": "session_1759019376630_8ab8wty8p",
+        "code": "def pypi()",
+        "cursor_position": 10,
+        "line_count": 1,
+        "char_count": 10,
+        "code_hash": "0c65d42f1dba6986a6370c9548b14ffd",
+        "created_at": "2025-09-28T06:00:25.376665+00:00"
+      },
+      {
+        "id": 3,
+        "session_id": "session_1759019376630_8ab8wty8p",
+        "code": "def pypi():\n    print(\"naan thaan da\"",
+        "cursor_position": 37,
+        "line_count": 2,
+        "char_count": 37,
+        "code_hash": "4b8b835ce38d581c019cc8f5fc8c65f2",
+        "created_at": "2025-09-28T06:00:34.459224+00:00"
+      },
+      {
+        "id": 4,
+        "session_id": "session_1759019376630_8ab8wty8p",
+        "code": "def pypi():\n    print(\"naan thaan da\")",
+        "cursor_position": 38,
+        "line_count": 2,
+        "char_count": 38,
+        "code_hash": "d08c54ed46ffd543ea7f29bb2fe16ea0",
+        "created_at": "2025-09-28T06:00:35.219075+00:00"
+      }
+    ],
+    "execution_results": [
+      {
+        "id": 1,
+        "session_id": "session_1759019376630_8ab8wty8p",
+        "code": "def pypi():\n    print(\"naan thaan da\")",
+        "code_hash": "d08c54ed46ffd543ea7f29bb2fe16ea0",
+        "success": false,
+        "output": "",
+        "error": "Docker execution failed: 409 Client Error for http+docker://localhost/v1.51/containers/6341122ed9b3c13d1e88ae7eb5f296094803390538fcf8454b9b25f45a8ebc97/logs?stderr=1&stdout=1&timestamps=0&follow=0&tail=all: Conflict (\"can not get logs from container which is dead or marked for removal\")",
+        "execution_time": "N/A",
+        "security_level": "Docker Sandboxed",
+        "language": "python",
+        "created_at": "2025-09-28T06:00:37.32813+00:00"
+      },
+      {
+        "id": 2,
+        "session_id": "session_1759019376630_8ab8wty8p",
+        "code": "def pypi():\n    print(\"naan thaan da\")",
+        "code_hash": "d08c54ed46ffd543ea7f29bb2fe16ea0",
+        "success": false,
+        "output": "",
+        "error": "Docker execution failed: 404 Client Error for http+docker://localhost/v1.51/containers/1e2d8c795f432823dc1489884eb3c494083573458268c4a3010a79c84cf6af8f/json: Not Found (\"No such container: 1e2d8c795f432823dc1489884eb3c494083573458268c4a3010a79c84cf6af8f\")",
+        "execution_time": "N/A",
+        "security_level": "Docker Sandboxed",
+        "language": "python",
+        "created_at": "2025-09-28T06:00:52.737207+00:00"
+      }
+    ]
+  },
+  "metadata": {
+    "total_sessions": 11,
+    "total_audio_chunks": 3,
+    "total_code_entries": 4,
+    "total_executions": 2,
+    "snapshot_size_bytes": 0
+  }
+}
