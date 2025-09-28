@@ -11,3 +11,4 @@ pytest
 psutil
 google-generativeai
 aiohttp
+deepgram-sdk
